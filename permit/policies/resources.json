@@ -1,0 +1,90 @@
+{
+  "resources": [
+    {
+      "key": "products",
+      "name": "Products",
+      "description": "Product catalog entries, scoped to sales organizations",
+      "actions": {
+        "view": { "name": "View" },
+        "view_pricing": { "name": "View Pricing" },
+        "create": { "name": "Create" },
+        "update": { "name": "Update" },
+        "delete": { "name": "Delete" }
+      },
+      "attributes": {
+        "sales_org_id": {
+          "type": "string",
+          "description": "The sales organization this product belongs to"
+        }
+      }
+    },
+    {
+      "key": "orders",
+      "name": "Orders",
+      "description": "Purchase orders, scoped to accounts",
+      "actions": {
+        "view": { "name": "View" },
+        "create": { "name": "Create" },
+        "update": { "name": "Update" },
+        "delete": { "name": "Delete" }
+      },
+      "attributes": {
+        "account_id": {
+          "type": "string",
+          "description": "The account this order belongs to"
+        }
+      }
+    },
+    {
+      "key": "quotes",
+      "name": "Quotes",
+      "description": "Request-for-quotation documents, scoped to accounts",
+      "actions": {
+        "view": { "name": "View" },
+        "create": { "name": "Create" },
+        "update": { "name": "Update" },
+        "delete": { "name": "Delete" }
+      },
+      "attributes": {
+        "account_id": {
+          "type": "string",
+          "description": "The account this quote belongs to"
+        }
+      }
+    },
+    {
+      "key": "cart",
+      "name": "Cart",
+      "description": "Shopping cart items, scoped to user + account",
+      "actions": {
+        "view": { "name": "View" },
+        "create": { "name": "Add Items" },
+        "delete": { "name": "Remove Items" }
+      }
+    },
+    {
+      "key": "admin_dashboard",
+      "name": "Admin Dashboard",
+      "description": "Administrative panel for managing users and policies",
+      "actions": {
+        "view": { "name": "View" }
+      }
+    },
+    {
+      "key": "users",
+      "name": "Users",
+      "description": "User management",
+      "actions": {
+        "manage": { "name": "Manage" }
+      }
+    },
+    {
+      "key": "pricing",
+      "name": "Pricing",
+      "description": "Product pricing visibility",
+      "actions": {
+        "view_pricing": { "name": "View Pricing" }
+      }
+    }
+  ]
+}

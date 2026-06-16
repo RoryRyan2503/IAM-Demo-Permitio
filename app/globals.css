@@ -1,0 +1,86 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 97%;
+    --foreground: 0 0% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
+    --primary: 350 83% 43%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 93%;
+    --secondary-foreground: 0 0% 18%;
+    --muted: 0 0% 93%;
+    --muted-foreground: 0 0% 44%;
+    --accent: 350 50% 95%;
+    --accent-foreground: 350 83% 33%;
+    --destructive: 0 84% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 88%;
+    --input: 0 0% 88%;
+    --ring: 350 83% 43%;
+    --radius: 0.375rem;
+  }
+  .dark {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 93%;
+    --primary: 350 75% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 82%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 52%;
+    --accent: 350 40% 16%;
+    --accent-foreground: 350 75% 72%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 350 75% 52%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply rounded-full bg-border; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(350 83% 43% / 0.45); }
+}
+
+@layer utilities {
+  .hon-dark { background: #0D0D0D; }
+  .hon-gradient {
+    background: linear-gradient(160deg, #0D0D0D 0%, #181010 50%, #0D0D0D 100%);
+  }
+  .hon-red-gradient {
+    background: linear-gradient(135deg, #C8102E 0%, #a00e24 100%);
+  }
+  .hon-glow {
+    box-shadow: 0 0 40px rgba(200, 16, 46, 0.25);
+  }
+  .hon-focus {
+    @apply focus:outline-none focus:ring-2 focus:ring-[#C8102E] focus:ring-offset-2;
+  }
+  .hon-grid-bg {
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 64px 64px;
+  }
+}
+

@@ -1,0 +1,46 @@
+{
+  "conditions": [
+    {
+      "id": "sales_org_filter",
+      "name": "Sales Org Access",
+      "description": "User can only access products in their authorized sales organizations",
+      "appliesTo": ["products:view", "products:view_pricing"],
+      "condition": {
+        "type": "attribute_match",
+        "userAttribute": "allowedSalesOrgs",
+        "resourceAttribute": "sales_org_id",
+        "operator": "contains"
+      },
+      "notes": "allowedSalesOrgs is set on the user object when calling permit.check(). It contains the sales org IDs from the CRM for the user's currently selected account."
+    },
+    {
+      "id": "account_access",
+      "name": "Account Scope",
+      "description": "User can only access orders/quotes for their authorized accounts",
+      "appliesTo": ["orders:view", "orders:create", "quotes:view", "quotes:create"],
+      "condition": {
+        "type": "attribute_match",
+        "userAttribute": "selectedAccountId",
+        "resourceAttribute": "account_id",
+        "operator": "equals"
+      }
+    },
+    {
+      "id": "procurement_persona_quotes",
+      "name": "Procurement Persona — Create Quotes",
+      "description": "Only buyers with procurement persona can create quotes",
+      "appliesTo": ["quotes:create"],
+      "condition": {
+        "type": "user_attribute",
+        "attribute": "persona",
+        "operator": "equals",
+        "value": "procurement"
+      },
+      "notes": "This is a pure ABAC condition. The role (buyer) grants quote:view. The persona (procurement) additionally gates quote:create."
+    }
+  ],
+  "notes": {
+    "implementation": "These conditions are evaluated in lib/authorization/canAccess.ts via permit.check(). When Permit.io is not configured (demo mode), the fallback RBAC in the same file replicates the procurement persona check manually.",
+    "permitCheck": "permit.check(userId, action, { type: resourceType, attributes: { sales_org_id, account_id } }) with user attributes { persona, allowedSalesOrgs, selectedAccountId } set at check time"
+  }
+}

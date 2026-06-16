@@ -1,0 +1,55 @@
+{
+  "roles": [
+    {
+      "key": "admin",
+      "name": "Admin",
+      "description": "Full access to all resources across all accounts and sales orgs",
+      "permissions": [
+        "products:view",
+        "products:view_pricing",
+        "products:create",
+        "products:update",
+        "products:delete",
+        "orders:view",
+        "orders:create",
+        "orders:update",
+        "orders:delete",
+        "quotes:view",
+        "quotes:create",
+        "quotes:update",
+        "quotes:delete",
+        "cart:view",
+        "cart:create",
+        "cart:delete",
+        "admin_dashboard:view",
+        "users:manage",
+        "pricing:view_pricing"
+      ]
+    },
+    {
+      "key": "buyer",
+      "name": "Buyer",
+      "description": "Can view and create orders, quotes (with procurement persona), and manage cart",
+      "permissions": [
+        "products:view",
+        "products:view_pricing",
+        "orders:view",
+        "orders:create",
+        "quotes:view",
+        "cart:view",
+        "cart:create",
+        "cart:delete",
+        "pricing:view_pricing"
+      ]
+    },
+    {
+      "key": "viewer",
+      "name": "Viewer",
+      "description": "Read-only access to products and orders. No pricing, no quotes, no cart.",
+      "permissions": [
+        "products:view",
+        "orders:view"
+      ]
+    }
+  ]
+}
