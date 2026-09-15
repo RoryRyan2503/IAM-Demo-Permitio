@@ -141,7 +141,15 @@ export type PermissionResource =
   | "quotes"
   | "cart"
   | "admin_dashboard"
-  | "users";
+  | "users"
+  // Additional resources used by the PingAuthorize demo policy sets
+  // (Phase 8 persona scenarios) — not wired into core e-commerce routes.
+  | "invoices"
+  | "accounts"
+  | "reports"
+  | "policy_sets"
+  | "policies";
+
 
 export type PermissionMap = Partial<
   Record<`${PermissionAction}:${PermissionResource}`, boolean>

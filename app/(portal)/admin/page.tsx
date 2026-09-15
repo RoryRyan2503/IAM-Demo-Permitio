@@ -1,14 +1,24 @@
 /**
- * Admin Panel — admin role only
+ * Admin Console — admin role only
  *
  * Route is protected by middleware (redirects non-admins to /403).
- * Displays Permit.io policy matrix fetched live from the API.
+ * Tabs:
+ *   - Provider       — active authorization provider, connectivity, audit trail
+ *   - Policy Sets    — PingAuthorize policy set CRUD
+ *   - Policies       — PingAuthorize policy CRUD + visual policy editor
+ *   - Policy Matrix  — legacy Permit.io policy matrix (live API)
+ *   - Demo Users     — demo persona reference
  */
 
 "use client";
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { ProviderPanel } from "@/components/admin/ProviderPanel";
+import { ProviderSwitcher } from "@/components/admin/ProviderSwitcher";
+import { PolicySetsPanel } from "@/components/admin/PolicySetsPanel";
+import { PoliciesPanel } from "@/components/admin/PoliciesPanel";
+import { RulesPanel } from "@/components/admin/RulesPanel";
 
 interface PermitRole {
   key: string;
@@ -52,7 +62,12 @@ export default function AdminPage() {
   const { user } = useAuth();
   const [policy, setPolicy] = useState<PolicyData | null>(null);
   const [policyLoading, setPolicyLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"matrix" | "users">("matrix");
+  const [activeTab, setActiveTab] = useState<"provider" | "policySets" | "policies" | "rules" | "matrix" | "users">("provider");
+  const [policySetFilter, setPolicySetFilter] = useState<string | undefined>(undefined);
+  const [policySetName, setPolicySetName] = useState<string | undefined>(undefined);
+  const [policyFilter, setPolicyFilter] = useState<string | undefined>(undefined);
+  const [policyName, setPolicyName] = useState<string | undefined>(undefined);
+  const [providerVersion, setProviderVersion] = useState(0);
 
   useEffect(() => {
     fetch("/api/admin/permit-policy")
@@ -81,43 +96,109 @@ export default function AdminPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Admin Panel</h1>
+          <h1 className="text-xl font-bold text-gray-900">Admin Console</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Authorization policies & user management · Logged in as{" "}
+            Multi-provider authorization management · Logged in as{" "}
             <span className="text-[#C8102E] font-medium">{user?.name}</span>
           </p>
         </div>
-        {policy?.source === "permit.io" && (
-          <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
-            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-xs font-medium text-green-700">Permit.io Connected</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <ProviderSwitcher onChanged={() => setProviderVersion((v) => v + 1)} />
+          {policy?.source === "permit.io" && (
+            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-xs font-medium text-green-700">Permit.io Connected</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex gap-1 rounded-lg bg-gray-100 p-1 w-fit">
-        <button
-          onClick={() => setActiveTab("matrix")}
-          className={`rounded-md px-4 py-2 text-xs font-medium transition-all ${
-            activeTab === "matrix"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
+      <div className="flex gap-1 rounded-lg bg-gray-100 p-1 w-fit flex-wrap">
+        {([
+          ["provider", "Provider"],
+          ["policySets", "Policy Sets"],
+          ["policies", "Policies"],
+          ["matrix", "Policy Matrix"],
+          ["users", "Demo Users"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`rounded-md px-4 py-2 text-xs font-medium transition-all ${
+              activeTab === key
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <a
+          href="/admin/test-access"
+          className="rounded-md px-4 py-2 text-xs font-medium text-gray-500 hover:text-gray-700"
         >
-          Policy Matrix
-        </button>
-        <button
-          onClick={() => setActiveTab("users")}
-          className={`rounded-md px-4 py-2 text-xs font-medium transition-all ${
-            activeTab === "users"
-              ? "bg-white text-gray-900 shadow-sm"
-              : "text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          Demo Users
-        </button>
+          Decision Testing →
+        </a>
       </div>
+
+      {/* ── Provider Tab ───────────────────────────────── */}
+      {activeTab === "provider" && <ProviderPanel key={providerVersion} />}
+
+      {/* ── Policy Sets Tab ────────────────────────────── */}
+      {activeTab === "policySets" && (
+        <PolicySetsPanel
+          onSelect={(id, name) => {
+            setPolicySetFilter(id);
+            setPolicySetName(name);
+            setActiveTab("policies");
+          }}
+        />
+      )}
+
+      {/* ── Policies Tab ───────────────────────────────── */}
+      {activeTab === "policies" && (
+        <div className="space-y-3">
+          {policySetFilter && (
+            <button
+              onClick={() => {
+                setPolicySetFilter(undefined);
+                setPolicySetName(undefined);
+                setActiveTab("policySets");
+              }}
+              className="text-xs font-medium text-gray-500 hover:text-gray-800"
+            >
+              ← Back to Policy Sets
+            </button>
+          )}
+          <PoliciesPanel
+            policySetIdFilter={policySetFilter}
+            policySetName={policySetName}
+            onSelectPolicy={(id, name) => {
+              setPolicyFilter(id);
+              setPolicyName(name);
+              setActiveTab("rules");
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Rules Tab (drill-down from Policies, real mode only) ─ */}
+      {activeTab === "rules" && policyFilter && (
+        <div className="space-y-3">
+          <button
+            onClick={() => {
+              setPolicyFilter(undefined);
+              setPolicyName(undefined);
+              setActiveTab("policies");
+            }}
+            className="text-xs font-medium text-gray-500 hover:text-gray-800"
+          >
+            ← Back to Policies
+          </button>
+          <RulesPanel policyId={policyFilter} policyName={policyName} />
+        </div>
+      )}
 
       {/* ── Policy Matrix Tab ──────────────────────────── */}
       {activeTab === "matrix" && (

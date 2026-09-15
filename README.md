@@ -1,6 +1,6 @@
 # IAM POC — Enterprise Fine-Grained Authorization Demo
 
-A production-grade Next.js 14 commerce platform demonstrating **RBAC + ABAC + dynamic data filtering** using **Ping Identity** (OIDC + PKCE) and **Permit.io**.
+A production-grade Next.js 14 commerce platform demonstrating **RBAC + ABAC + dynamic data filtering** using **Ping Identity** (OIDC + PKCE) and a **pluggable authorization layer** supporting both **Permit.io** and **PingAuthorize**.
 
 ---
 
@@ -17,9 +17,34 @@ Browser
 Authorization layers:
   1. Ping Identity OIDC → JWT (role: admin | buyer | viewer)
   2. CRM layer         → accounts + salesOrgs per user
-  3. Permit.io / RBAC  → canAccess(userId, action, resource)
-  4. Data filter       → Supabase .in('sales_org_id', allowedOrgs)
+  3. AuthorizationService.checkAccess() → Provider Factory → active provider
+         ├── PermitProvider        (Permit.io)
+         └── PingAuthorizeProvider (PingAuthorize)
+     (each provider falls back to built-in tool-based RBAC if unreachable)
+  4. Data filter        → Supabase .in('sales_org_id', allowedOrgs)
 ```
+
+### Pluggable Authorization Provider
+
+```mermaid
+flowchart LR
+  FE[Frontend / API routes] --> AS[AuthorizationService.checkAccess]
+  AS --> PF[Provider Factory]
+  PF -->|AUTH_PROVIDER=permit| PP[PermitProvider]
+  PF -->|AUTH_PROVIDER=ping| PGP[PingAuthorizeProvider]
+  PP --> PIO[(Permit.io PDP)]
+  PGP --> PGA[(PingAuthorize PDP/PAP)]
+  PP -. unreachable/error .-> RB[Tool-based RBAC fallback]
+  PGP -. unreachable/error .-> RB
+```
+
+All authorization checks — across every API route — go through the single
+`AuthorizationService.checkAccess()` entry point (`lib/authorization/AuthorizationService.ts`).
+It never calls Permit.io or PingAuthorize directly; it resolves the *active*
+provider via the Provider Factory (`lib/authorization/providerFactory.ts`),
+which can be switched at runtime from the **Admin Console → Provider** tab, or
+pinned via the `AUTH_PROVIDER` env var (`permit` | `ping`). See
+[MIGRATION.md](./MIGRATION.md) for the full migration guide and rationale.
 
 ### Three Demo Personas
 
@@ -133,7 +158,16 @@ IAMpoc/
 │   │   ├── pkce.ts                 # PKCE code_verifier / challenge (RFC 7636)
 │   │   └── session.ts              # httpOnly cookie session management
 │   ├── authorization/
-│   │   ├── canAccess.ts            # THE authorization entry point (Permit.io + fallback RBAC)
+│   │   ├── canAccess.ts            # Backward-compatible wrapper → AuthorizationService
+│   │   ├── AuthorizationService.ts # THE authorization entry point (single call site for all routes)
+│   │   ├── providerFactory.ts      # Resolves active provider (env var + runtime override)
+│   │   ├── providers/
+│   │   │   ├── AuthorizationProvider.ts  # Pluggable provider interface
+│   │   │   ├── PermitProvider.ts         # Permit.io implementation
+│   │   │   └── PingAuthorizeProvider.ts  # PingAuthorize implementation
+│   │   ├── fallbackRebac.ts        # Shared tool-based RBAC fallback (both providers)
+│   │   ├── decisionCache.ts        # Short-TTL in-memory decision cache
+│   │   ├── auditLog.ts             # In-memory authorization audit trail
 │   │   ├── filterByPermission.ts   # Supabase query filters (data-level ABAC)
 │   │   └── permitClient.ts         # Permit.io SDK singleton
 │   ├── crm/
@@ -142,6 +176,14 @@ IAMpoc/
 │   └── supabase/
 │       ├── client.ts               # Browser Supabase client (anon key)
 │       └── server.ts               # Server Supabase client (service key, bypasses RLS)
+├── services/
+│   └── ping-authorize/
+│       ├── client.ts               # REST client (Basic Auth, retries, X-Respond-With)
+│       ├── types.ts                # PingAuthorize domain types (Policy, PolicySet, Decision...)
+│       ├── demoStore.ts            # In-memory demo policy sets/policies (no PAP/PDP required)
+│       ├── policySets.ts           # Policy Set CRUD (real PAP or demo store)
+│       ├── policies.ts             # Policy CRUD (real PAP or demo store)
+│       └── decisions.ts            # PDP evaluation (real PDP call or local evaluator fallback)
 ├── middleware.ts                   # Route protection + session injection
 ├── permit/policies/
 │   ├── roles.json                  # Role definitions + permissions
@@ -234,6 +276,15 @@ PERMIT_PDP_URL=https://cloudpdp.api.permit.io
 
 > When `PERMIT_API_KEY` starts with `permit_key_demo` or is absent, the app automatically falls back to the built-in RBAC engine in `lib/authorization/canAccess.ts`.
 
+### PingAuthorize
+
+1. Set `AUTH_PROVIDER=ping` in `.env.local` (or leave it as `permit` and switch at runtime from **Admin Console → Provider**).
+2. If you have a real PingAuthorize deployment, set `PING_PAP_URL`, `PING_PDP_URL`, `PING_USERNAME`, `PING_PASSWORD`.
+3. If those are left unset, the app runs PingAuthorize in **local demo mode** — a seeded in-memory policy store (`services/ping-authorize/demoStore.ts`) and a local decision evaluator (`services/ping-authorize/decisions.ts`) — so Policy Sets, Policies, and the Decision Testing Console all work without any external PingAuthorize instance.
+4. Manage policy sets/policies from the **Admin Console → Policy Sets / Policies** tabs, and compare decisions against Permit.io from **Admin Console → Decision Testing**.
+
+> See [MIGRATION.md](./MIGRATION.md) for the full multi-provider architecture, migration steps, and what's a verified fact vs. a documented simplification for PingAuthorize's PAP/PDP contracts.
+
 ---
 
 ## Environment Variables Reference
@@ -250,6 +301,11 @@ PERMIT_PDP_URL=https://cloudpdp.api.permit.io
 | `SUPABASE_SERVICE_KEY` | No* | Supabase service role key (server-side only) |
 | `PERMIT_API_KEY` | No* | Permit.io API key |
 | `PERMIT_PDP_URL` | No* | Permit.io PDP URL |
+| `AUTH_PROVIDER` | No | Active authorization provider: `permit` \| `ping` (default `permit`) |
+| `PING_PAP_URL` | No* | PingAuthorize Policy Administration Point base URL |
+| `PING_PDP_URL` | No* | PingAuthorize Policy Decision Point base URL |
+| `PING_USERNAME` | No* | PingAuthorize Basic Auth username |
+| `PING_PASSWORD` | No* | PingAuthorize Basic Auth password |
 | `SESSION_SECRET` | Yes | 32+ char secret for session signing |
 
 *Not required in demo mode — the app uses mock data and fallback RBAC when these are absent.

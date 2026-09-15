@@ -23,7 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/orders",    label: "Orders",             icon: <ClipIcon />,      action: "view", resource: "orders",   toolId: "TL003" },
   { href: "/quotes",    label: "Invoices",           icon: <DocIcon />,       action: "view", resource: "quotes",   toolId: "TL009" },
   { href: "/cart",      label: "Cart",               icon: <CartIcon />,      action: "view", resource: "cart",     toolId: "TL001" },
-  { href: "/admin",     label: "Admin",              icon: <ShieldIcon />,    adminOnly: true },
+  { href: "/admin",     label: "Admin Console",     icon: <ShieldIcon />,    adminOnly: true },
 ];
 
 export function Sidebar() {

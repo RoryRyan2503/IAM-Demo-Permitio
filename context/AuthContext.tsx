@@ -135,6 +135,30 @@ export function AuthProvider({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ------------------------------------------------------------------
+  // Re-fetch permissions whenever the tab regains focus/visibility.
+  //
+  // Permissions are otherwise only fetched once at initial load, so
+  // changes made directly in the Permit.io / PingAuthorize dashboard
+  // (in another tab) would never show up in this app without a manual
+  // hard refresh. Refetching on focus keeps the UI in sync without
+  // needing to poll continuously.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState === "visible") {
+        fetchPermissions();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [fetchPermissions]);
+
+  // ------------------------------------------------------------------
   // Auth actions
   // ------------------------------------------------------------------
   const login = useCallback((persona?: "admin" | "buyer" | "viewer") => {
