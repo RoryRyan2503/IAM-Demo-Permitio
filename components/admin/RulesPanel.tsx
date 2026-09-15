@@ -195,7 +195,7 @@ export function RulesPanel({ policyId, policyName }: { policyId: string; policyN
                 rows={2}
               />
               <p className="text-[10px] text-gray-400 mt-1">
-                Evaluated by PingAuthorize's policy engine; must be a valid condition expression for your PDP.
+                Evaluated by PingAuthorize&apos;s policy engine; must be a valid condition expression for your PDP.
               </p>
             </div>
           )}

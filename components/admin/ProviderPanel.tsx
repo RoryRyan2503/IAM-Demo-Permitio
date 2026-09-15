@@ -87,7 +87,7 @@ export function ProviderPanel() {
   if (!status) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-        Could not load provider status. Check that the dev server is running and you're signed in as an admin.
+        Could not load provider status. Check that the dev server is running and you&apos;re signed in as an admin.
       </div>
     );
   }
