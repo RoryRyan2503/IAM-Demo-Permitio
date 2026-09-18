@@ -4,8 +4,8 @@
  * Decision Testing Console — /admin/test-access
  *
  * Lets an admin enter a synthetic user/role/resource/action/context and run
- * the SAME authorization request against Permit.io and PingAuthorize side by
- * side, to compare the two engines while migrating policies.
+ * it against PingAuthorize to inspect the resulting decision, engine, and
+ * latency.
  */
 
 import { useState } from "react";
@@ -31,7 +31,6 @@ interface DecisionResult {
 interface TestAccessResponse {
   request: unknown;
   results: DecisionResult[];
-  agree: boolean;
 }
 
 export default function TestAccessPage() {
@@ -81,7 +80,7 @@ export default function TestAccessPage() {
         </Link>
         <h1 className="text-xl font-bold text-gray-900 mt-1">Decision Testing Console</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Compare Permit.io vs PingAuthorize decisions for the same request
+          Run a synthetic request against PingAuthorize
         </p>
       </div>
 
@@ -145,17 +144,15 @@ export default function TestAccessPage() {
             disabled={loading}
             className="rounded-lg bg-[#C8102E] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#a80d26] disabled:opacity-50"
           >
-            {loading ? "Running..." : "Run Comparison"}
+            {loading ? "Running..." : "Run Check"}
           </button>
         </div>
       </div>
 
       {result && (
         <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div className={`px-5 py-3 border-b border-gray-100 ${result.agree ? "bg-green-50" : "bg-amber-50"}`}>
-            <p className={`text-sm font-semibold ${result.agree ? "text-green-800" : "text-amber-800"}`}>
-              {result.agree ? "Providers agree" : "Providers DISAGREE"}
-            </p>
+          <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+            <p className="text-sm font-semibold text-gray-800">Decision result</p>
           </div>
           <table className="w-full text-sm">
             <thead>

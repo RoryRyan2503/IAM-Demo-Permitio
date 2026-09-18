@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useAccountContext } from "@/context/AccountContext";
 import { useAuth } from "@/context/AuthContext";
+import { useRouteGuard } from "@/hooks/useRouteGuard";
 import { PermissionGate } from "@/components/permissions/PermissionGate";
 import { AccessDenied } from "@/components/permissions/AccessDenied";
 
@@ -40,6 +41,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function QuotesPage() {
   const { selectedAccount } = useAccountContext();
   const { user } = useAuth();
+  useRouteGuard("view", "quotes");
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

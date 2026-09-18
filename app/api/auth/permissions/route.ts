@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     const authEngine = getLastAuthEngine();
     trace.tags.push(`auth:${authEngine}`);
     trace.upstreamCalls.push({
-      service: "Permit.io",
+      service: "PingAuthorize",
       method: "POST",
       url: "permit.check() ×10",
       status: 200,

@@ -1,14 +1,8 @@
 /**
  * POST /api/admin/test-access — Decision Testing Console backend
  *
- * Runs an authorization check against BOTH providers (Permit.io and
- * PingAuthorize) for a manually specified subject/resource/action/context and
- * returns a side-by-side comparison. Used exclusively by /admin/test-access.
- *
- * This intentionally calls checkAccessDetailed() twice with an explicit
- * providerName so it can compare engines regardless of which one is
- * currently "active" — the one case where bypassing the single active
- * provider is appropriate, since comparison IS the feature.
+ * Runs an authorization check against PingAuthorize for a manually specified
+ * subject/resource/action/context. Used exclusively by /admin/test-access.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -48,21 +42,15 @@ export async function POST(req: NextRequest) {
       toolIds: body.toolIds ?? [],
     };
 
-    const [permitResult, pingResult] = await Promise.all([
-      checkAccessDetailed(body.userId, body.action, body.resource, context, body.role, "permit"),
-      checkAccessDetailed(body.userId, body.action, body.resource, context, body.role, "ping"),
-    ]);
+    const pingResult = await checkAccessDetailed(body.userId, body.action, body.resource, context, body.role, "ping");
 
     return NextResponse.json({
       request: { userId: body.userId, role: body.role, resource: body.resource, action: body.action, context },
-      results: [
-        { provider: "Permit.io", ...permitResult },
-        { provider: "PingAuthorize", ...pingResult },
-      ],
-      agree: permitResult.allowed === pingResult.allowed,
+      results: [{ provider: "PingAuthorize", ...pingResult }],
     });
   } catch (error) {
     const { message, status } = authErrorResponse(error);
     return NextResponse.json({ error: message }, { status });
   }
 }
+

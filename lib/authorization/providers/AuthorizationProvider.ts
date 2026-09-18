@@ -1,19 +1,19 @@
 /**
  * AuthorizationProvider — pluggable authorization engine interface
  * ============================================================================
- * This is the contract every authorization backend (Permit.io, PingAuthorize,
- * future engines like OPA/OpenFGA/Cedar) must implement.
+ * This is the contract an authorization backend (PingAuthorize; the Permit.io
+ * SDK was removed, future engines like OPA/OpenFGA/Cedar could be added)
+ * must implement.
  *
  * ARCHITECTURAL RULE: nothing outside `lib/authorization/**` and
- * `services/ping-authorize/**` may import the Permit SDK or call a
- * PingAuthorize REST endpoint directly. All application code goes through
- * `AuthorizationService.checkAccess()` (see ../AuthorizationService.ts), which
- * resolves the active provider via the provider factory and delegates to it.
+ * `services/ping-authorize/**` may call a PingAuthorize REST endpoint
+ * directly. All application code goes through `AuthorizationService.checkAccess()`
+ * (see ../AuthorizationService.ts), which resolves the active provider via
+ * the provider factory and delegates to it.
  *
  *   Frontend / API routes
  *        └── AuthorizationService.checkAccess(...)
  *              └── ProviderFactory.getProvider()
- *                    ├── PermitProvider           (Permit.io PDP)
  *                    └── PingAuthorizeProvider     (PingAuthorize PDP)
  */
 

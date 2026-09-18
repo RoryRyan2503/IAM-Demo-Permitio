@@ -1,7 +1,7 @@
 /**
  * Tool-based ReBAC fallback engine
  * ============================================================================
- * Shared, provider-agnostic fallback used by BOTH PermitProvider and
+ * Shared fallback used by PingAuthorizeProvider when the PDP is unreachable
  * PingAuthorizeProvider when their respective PDP is not configured or is
  * unreachable. Extracted from the original canAccess.ts so it isn't tied to
  * Permit.io specifically.

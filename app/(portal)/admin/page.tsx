@@ -19,6 +19,8 @@ import { ProviderSwitcher } from "@/components/admin/ProviderSwitcher";
 import { PolicySetsPanel } from "@/components/admin/PolicySetsPanel";
 import { PoliciesPanel } from "@/components/admin/PoliciesPanel";
 import { RulesPanel } from "@/components/admin/RulesPanel";
+import { UserManagementPanel } from "@/components/admin/UserManagementPanel";
+import { AuthDebugPanel } from "@/components/admin/AuthDebugPanel";
 
 interface PermitRole {
   key: string;
@@ -62,7 +64,7 @@ export default function AdminPage() {
   const { user } = useAuth();
   const [policy, setPolicy] = useState<PolicyData | null>(null);
   const [policyLoading, setPolicyLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"provider" | "policySets" | "policies" | "rules" | "matrix" | "users">("provider");
+  const [activeTab, setActiveTab] = useState<"provider" | "policySets" | "policies" | "rules" | "matrix" | "users" | "userManagement" | "debug">("provider");
   const [policySetFilter, setPolicySetFilter] = useState<string | undefined>(undefined);
   const [policySetName, setPolicySetName] = useState<string | undefined>(undefined);
   const [policyFilter, setPolicyFilter] = useState<string | undefined>(undefined);
@@ -116,10 +118,12 @@ export default function AdminPage() {
       {/* Tab Navigation */}
       <div className="flex gap-1 rounded-lg bg-gray-100 p-1 w-fit flex-wrap">
         {([
-          ["provider", "Provider"],
+          ["provider", "Authorization Provider"],
           ["policySets", "Policy Sets"],
-          ["policies", "Policies"],
+          ["policies", "Policy Management"],
           ["matrix", "Policy Matrix"],
+          ["userManagement", "User Management"],
+          ["debug", "Debug"],
           ["users", "Demo Users"],
         ] as const).map(([key, label]) => (
           <button
@@ -144,6 +148,12 @@ export default function AdminPage() {
 
       {/* ── Provider Tab ───────────────────────────────── */}
       {activeTab === "provider" && <ProviderPanel key={providerVersion} />}
+
+      {/* ── User Management Tab ────────────────────────── */}
+      {activeTab === "userManagement" && <UserManagementPanel />}
+
+      {/* ── Debug Tab ──────────────────────────────────── */}
+      {activeTab === "debug" && <AuthDebugPanel />}
 
       {/* ── Policy Sets Tab ────────────────────────────── */}
       {activeTab === "policySets" && (

@@ -5,13 +5,16 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountContext } from "@/context/AccountContext";
 import { getSalesOrgStyle } from "@/lib/utils";
+import { ConnectionStatusBadge } from "@/components/layout/ConnectionStatusBadge";
+import { SwitchUserModal } from "@/components/layout/SwitchUserModal";
 
 export function Navbar() {
-  const { user, logout, authEngine, dataSource } = useAuth();
+  const { user, logout, dataSource } = useAuth();
   const { selectedAccount, availableAccounts, switchAccount, isLoading, userContext } =
     useAccountContext();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
+  const [switchUserOpen, setSwitchUserOpen] = useState(false);
   const accountDropdownRef = useRef<HTMLDivElement>(null);
 
   // Close account dropdown on outside click
@@ -139,17 +142,7 @@ export function Navbar() {
       {/* ── Right: user menu ── */}
       {user && (
         <div className="relative flex items-center gap-3">
-          {authEngine === "permit.io" ? (
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 border border-emerald-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Permit.io
-            </span>
-          ) : (
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 border border-amber-200">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-              Local Fallback
-            </span>
-          )}
+          <ConnectionStatusBadge />
           {dataSource === "supabase" ? (
             <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 border border-blue-200">
               <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
@@ -207,6 +200,15 @@ export function Navbar() {
                     Account Dashboard
                   </Link>
                   <button
+                    onClick={() => { setUserMenuOpen(false); setSwitchUserOpen(true); }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                      <path d="M5.5 5.5L2 9m0 0l3.5 3.5M2 9h9M10.5 10.5L14 7m0 0l-3.5-3.5M14 7H5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Switch User
+                  </button>
+                  <button
                     onClick={() => { setUserMenuOpen(false); logout(); }}
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-red-600 hover:bg-red-50 transition-colors"
                   >
@@ -221,6 +223,7 @@ export function Navbar() {
           )}
         </div>
       )}
+      <SwitchUserModal open={switchUserOpen} onClose={() => setSwitchUserOpen(false)} />
     </header>
   );
 }

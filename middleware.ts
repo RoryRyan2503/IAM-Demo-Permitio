@@ -19,7 +19,7 @@ import { decodeJwt } from "jose";
 import type { AuthSession } from "@/types";
 
 // Routes that don't require authentication
-const PUBLIC_ROUTES = ["/login", "/api/auth/login", "/api/auth/callback", "/403"];
+const PUBLIC_ROUTES = ["/login", "/api/auth/login", "/api/auth/callback", "/403", "/access-denied"];
 // Routes that require admin role
 const ADMIN_ROUTES = ["/admin"];
 
@@ -81,7 +81,9 @@ export function middleware(req: NextRequest) {
 
   // Admin route protection
   if (isAdminRoute(pathname) && session.role !== "admin") {
-    return NextResponse.redirect(new URL("/403", req.url));
+    const deniedUrl = new URL("/access-denied", req.url);
+    deniedUrl.searchParams.set("resource", pathname);
+    return NextResponse.redirect(deniedUrl);
   }
 
   // Inject user ID into request headers for route handlers

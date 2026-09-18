@@ -1,12 +1,11 @@
 /**
- * 403 — legacy alias, kept for backward compatibility. Renders the same
- * enterprise Access Denied screen as /access-denied.
+ * /access-denied — canonical route unauthorized page/route access redirects to.
  */
 
 import { Suspense } from "react";
 import { AccessDeniedScreen } from "@/components/permissions/AccessDeniedScreen";
 
-export default function ForbiddenPage() {
+export default function AccessDeniedPage() {
   return (
     <Suspense fallback={null}>
       <AccessDeniedScreen />

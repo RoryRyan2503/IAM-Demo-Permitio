@@ -38,26 +38,33 @@ const DEFAULT_COMBINING_ALGORITHM: CombiningAlgorithm = { algorithm: "DenyOverri
 export async function listPolicies(policySetId?: string): Promise<Array<PingPolicy | DemoPolicy>> {
   if (!isPapConfigured()) return demo.listPoliciesDemo(policySetId);
 
-  const branch = requireBranchId();
+  try {
+    const branch = requireBranchId();
 
-  if (policySetId) {
-    // Real API has no server-side "policies by policy set" filter — the
-    // relationship lives on the PolicySet's `children` references instead.
-    // We're in real mode here (isPapConfigured() checked above), so `parent`
-    // is a PingPolicySet, not a DemoPolicySet.
-    const parent = (await getPolicySet(policySetId)) as PingPolicySet | undefined;
-    const refs = ((parent?.children ?? []) as EntityRef[]).filter((c) => c.type === "Policy");
-    return Promise.all(refs.map((ref) => pingRequest<PingPolicy>(
+    if (policySetId) {
+      // Real API has no server-side "policies by policy set" filter — the
+      // relationship lives on the PolicySet's `children` references instead.
+      // We're in real mode here (isPapConfigured() checked above), so `parent`
+      // is a PingPolicySet, not a DemoPolicySet.
+      const parent = (await getPolicySet(policySetId)) as PingPolicySet | undefined;
+      const refs = ((parent?.children ?? []) as EntityRef[]).filter((c) => c.type === "Policy");
+      return await Promise.all(refs.map((ref) => pingRequest<PingPolicy>(
+        getPapBaseUrl(),
+        `${POLICIES_PATH}/${encodeURIComponent(ref.id)}?branch=${encodeURIComponent(branch)}`
+      )));
+    }
+
+    const res = await pingRequest<PaginatedResponse<PingPolicy>>(
       getPapBaseUrl(),
-      `${POLICIES_PATH}/${encodeURIComponent(ref.id)}?branch=${encodeURIComponent(branch)}`
-    )));
+      `${POLICIES_PATH}?branch=${encodeURIComponent(branch)}&page=1&page-size=100`
+    );
+    return res.data;
+  } catch (error) {
+    // Real tenant configured but unreachable (network/timeout) — degrade to
+    // the local demo store rather than leaving the Policies tab unusable.
+    console.warn("[PingAuthorize] listPolicies unreachable, falling back to demo store:", error);
+    return demo.listPoliciesDemo(policySetId);
   }
-
-  const res = await pingRequest<PaginatedResponse<PingPolicy>>(
-    getPapBaseUrl(),
-    `${POLICIES_PATH}?branch=${encodeURIComponent(branch)}&page=1&page-size=100`
-  );
-  return res.data;
 }
 
 export async function getPolicy(id: string): Promise<PingPolicy | DemoPolicy | undefined> {

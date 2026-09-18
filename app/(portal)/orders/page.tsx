@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccountContext } from "@/context/AccountContext";
+import { useRouteGuard } from "@/hooks/useRouteGuard";
 import { AccessDenied } from "@/components/permissions/AccessDenied";
 
 interface OrderItem {
@@ -33,6 +34,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function OrdersPage() {
   const { selectedAccount } = useAccountContext();
+  useRouteGuard("view", "orders");
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -55,12 +55,19 @@ export interface UpdatePolicySetInput {
 export async function listPolicySets(): Promise<Array<PingPolicySet | DemoPolicySet>> {
   if (!isPapConfigured()) return demo.listPolicySetsDemo();
 
-  const branch = requireBranchId();
-  const res = await pingRequest<PaginatedResponse<PingPolicySet>>(
-    getPapBaseUrl(),
-    `${POLICYSETS_PATH}?branch=${encodeURIComponent(branch)}&page=1&page-size=100`
-  );
-  return res.data;
+  try {
+    const branch = requireBranchId();
+    const res = await pingRequest<PaginatedResponse<PingPolicySet>>(
+      getPapBaseUrl(),
+      `${POLICYSETS_PATH}?branch=${encodeURIComponent(branch)}&page=1&page-size=100`
+    );
+    return res.data;
+  } catch (error) {
+    // Real tenant configured but unreachable (network/timeout) — degrade to
+    // the local demo store rather than leaving the Policy Sets tab unusable.
+    console.warn("[PingAuthorize] listPolicySets unreachable, falling back to demo store:", error);
+    return demo.listPolicySetsDemo();
+  }
 }
 
 export async function getPolicySet(id: string): Promise<PingPolicySet | DemoPolicySet | undefined> {

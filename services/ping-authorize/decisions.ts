@@ -44,17 +44,11 @@
 
 import { pingRequest, isPdpConfigured, getPdpBaseUrl } from "./client";
 import { listPoliciesDemo } from "./demoStore";
-import type { DecisionRequest, DecisionResult, PdpRequest, PdpResponse, DemoPolicy, PolicyCondition } from "./types";
+import type { DecisionRequest, DecisionResult, PdpRequest, PdpEnvelope, PdpResponse, DemoPolicy, PolicyCondition } from "./types";
 
 // ---------------------------------------------------------------------------
 // Real PDP call
 // ---------------------------------------------------------------------------
-
-function toAttributeValue(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  if (Array.isArray(value)) return value.join(",");
-  return String(value);
-}
 
 /** e.g. "admin_dashboard" -> "AdminDashboard", "products" -> "Products" */
 function toPascalCase(key: string): string {
@@ -68,56 +62,45 @@ const ADMIN_RESOURCE_TYPES = new Set(["admin_dashboard", "users", "policy_sets",
 
 /**
  * Flattens this app's internal DecisionRequest (subject/resource/action/
- * environment) into the real PingAuthorize JSON PDP API request shape
- * (Domain/Action/Service/IdentityProvider + flat string attributes map).
+ * environment) into the agreed PingAuthorize JSON PDP API wire envelope:
  *
- * Mapping used by this app (see MIGRATION.md for the full Trust Framework
- * design + PAP setup steps):
- *   - `service`          <- resource type, namespaced e.g. "Commerce.Products"
- *                           or "Admin.PolicySets" for admin-console resources
- *   - `action`           <- passed through as-is (view, view_pricing, create, ...)
- *   - `domain`           <- subject persona, namespaced e.g. "Persona.Procurement",
- *                           falling back to "Role.<Role>" if no persona
- *   - `identityProvider` <- constant "PingOne.HonDemo" (this app authenticates
- *                           via Ping Identity OIDC — see lib/auth/pingConfig.ts)
- *   - `attributes`       <- flat "Subject.*" / "Resource.*" / "Environment.*"
- *                           string attributes for fine-grained ABAC conditions
- *                           (each must be configured as a Trust Framework
- *                           attribute with a Request resolver in the PAP)
+ *   {
+ *     "decisionRequest": {
+ *       "domain": "HonEcom",
+ *       "service": "Commerce.<Page>",
+ *       "identityProvider": "",
+ *       "action": "view" | "create" | "update" | "delete",
+ *       "attributes": { "role": "admin" | "buyer" | "viewer" }
+ *     },
+ *     "attributeValueOverrides": {},
+ *     "serviceValueOverrides": {}
+ *   }
+ *
+ * `domain` is always the constant "HonEcom". `service` is namespaced per
+ * page (`Commerce.Products`, `Commerce.Cart`, `Commerce.Orders`, ... or
+ * `Admin.*` for admin-console resources). `attributes` intentionally carries
+ * only `role` — no other subject/resource attributes are sent, per the
+ * agreed request template.
  */
-export function toTrustFrameworkRequest(request: DecisionRequest): PdpRequest {
-  const { subject, resource, action, environment } = request;
+export function toTrustFrameworkRequest(request: DecisionRequest): PdpEnvelope {
+  const { subject, resource, action } = request;
 
   const service = ADMIN_RESOURCE_TYPES.has(resource.type)
     ? `Admin.${toPascalCase(resource.type)}`
     : `Commerce.${toPascalCase(resource.type)}`;
 
-  const domain = subject.persona ? `Persona.${toPascalCase(subject.persona)}` : `Role.${toPascalCase(subject.role)}`;
-
-  const attributes: Record<string, string> = {
-    "Subject.Id": subject.id,
-    "Subject.Role": subject.role,
-    "Subject.Persona": subject.persona ?? "",
-    "Subject.IsSuperUser": toAttributeValue(subject.isSuperUser ?? false),
-    "Subject.AllowedSalesOrgs": toAttributeValue(subject.attributes.allowedSalesOrgs),
-    "Subject.SelectedAccountId": toAttributeValue(subject.attributes.selectedAccountId),
-    "Subject.ToolIds": toAttributeValue(subject.attributes.toolIds),
-    "Resource.Type": resource.type,
-  };
-
-  for (const [key, value] of Object.entries(resource.attributes)) {
-    attributes[`Resource.${toPascalCase(key)}`] = toAttributeValue(value);
-  }
-  for (const [key, value] of Object.entries(environment ?? {})) {
-    attributes[`Environment.${toPascalCase(key)}`] = toAttributeValue(value);
-  }
-
   return {
-    domain,
-    action,
-    service,
-    identityProvider: "PingOne.HonDemo",
-    attributes,
+    decisionRequest: {
+      domain: "HonEcom",
+      service,
+      identityProvider: "",
+      action,
+      attributes: {
+        role: subject.role,
+      },
+    },
+    attributeValueOverrides: {},
+    serviceValueOverrides: {},
   };
 }
 
@@ -127,11 +110,28 @@ async function evaluateAccessRemote(request: DecisionRequest): Promise<DecisionR
   const res = await pingRequest<PdpResponse>(getPdpBaseUrl(), "/governance-engine", {
     method: "POST",
     body,
+    // Decisions are evaluated many times per page load — fail fast (no
+    // retries, short timeout) so an unreachable PDP falls back to the local
+    // demo evaluator quickly instead of stalling the request for 20-30s.
+    retries: 0,
+    timeoutMs: 3000,
   });
+
+  // INDETERMINATE/NOT_APPLICABLE mean the PDP is reachable but no policy's
+  // Target matched this request (commonly: policies edited in a branch but
+  // never deployed/published to the environment the PDP evaluates, or a
+  // Domain/Service/Action mismatch). Treat both as a distinct failure — NOT
+  // a real Deny — so the caller falls back to the role/tool-based ReBAC
+  // safety net instead of the persona-oriented local demo store (which
+  // models different scenarios and would mask this).
+  if (res.decision === "INDETERMINATE" || res.decision === "NOT_APPLICABLE") {
+    throw new Error(
+      `PingAuthorize PDP returned ${res.decision} — no policy Target matched this request. Check that the policy/branch is deployed/published, and that Domain/Service/Action targets match exactly.`
+    );
+  }
 
   const advice = res.statements?.map((s) => s.name).filter(Boolean).join("; ");
   // Real API returns `authorised` (British spelling) — `authorized` kept as a fallback.
-  // `decision` can also be "INDETERMINATE" (no policy matched / eval error) — treat as Deny.
   const authorised = res.authorised ?? res.authorized ?? false;
   return {
     effect: authorised || res.decision === "PERMIT" ? "Permit" : "Deny",
@@ -222,15 +222,11 @@ function evaluateAccessLocal(request: DecisionRequest): DecisionResult {
 
 export async function evaluateAccess(request: DecisionRequest): Promise<DecisionResult> {
   if (isPdpConfigured()) {
-    try {
-      return await evaluateAccessRemote(request);
-    } catch (error) {
-      console.warn(
-        "[PingAuthorize] Remote PDP call failed, falling back to local demo evaluator:",
-        error instanceof Error ? error.message : error
-      );
-      return evaluateAccessLocal(request);
-    }
+    // Let failures (including INDETERMINATE) propagate to the caller
+    // (PingAuthorizeProvider), which applies the role/tool-based ReBAC
+    // fallback — the demo persona store below models unrelated scenarios
+    // and would silently mask a misconfigured/undeployed real tenant.
+    return evaluateAccessRemote(request);
   }
   return evaluateAccessLocal(request);
 }

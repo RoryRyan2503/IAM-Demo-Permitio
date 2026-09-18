@@ -3,14 +3,10 @@
 /**
  * ProviderPanel — Admin Console "Overview" tab
  *
- * Shows the currently active authorization provider, PingAuthorize/Permit.io
- * connectivity status, policy set/policy counts, a configuration-health
- * warning banner (when PingAuthorize is enabled but not fully configured),
- * and a feed of recent authorization decisions from the audit log.
- *
- * Runtime provider switching itself lives in the header `ProviderSwitcher`
- * dropdown (visible from every Admin Console tab) — this panel is read-only
- * status/detail.
+ * Shows PingAuthorize connectivity status, policy set/policy counts, a
+ * configuration-health warning banner (when PingAuthorize is enabled but not
+ * fully configured), and a feed of recent authorization decisions from the
+ * audit log.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -21,11 +17,8 @@ interface ConnectivityStatus {
 }
 
 interface ProviderStatus {
-  active: "permit" | "ping";
-  envDefault: "permit" | "ping";
-  runtimeOverride: "permit" | "ping" | null;
-  available: string[];
-  connectivity: { permit: ConnectivityStatus; ping: ConnectivityStatus };
+  active: "ping";
+  connectivity: { ping: ConnectivityStatus };
   pingConfigWarning?: string;
   counts: { policySets: number | null; policies: number | null };
   countsError?: string;
@@ -45,7 +38,6 @@ interface AuditEntry {
 }
 
 const PROVIDER_LABEL: Record<string, string> = {
-  permit: "Permit.io",
   ping: "PingAuthorize",
 };
 
@@ -101,26 +93,19 @@ export function ProviderPanel() {
         </div>
       )}
 
-      {/* Active provider (read-only — switch via the dropdown in the header) */}
+      {/* Active provider */}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Active Authorization Provider</p>
             <p className="text-xl font-bold text-gray-900 mt-1">{PROVIDER_LABEL[status.active]}</p>
-            <p className="text-[11px] text-gray-400 mt-1">
-              Env default: <span className="font-mono">{status.envDefault}</span>
-              {status.runtimeOverride && (
-                <> · Runtime override: <span className="font-mono text-[#C8102E]">{status.runtimeOverride}</span></>
-              )}
-            </p>
           </div>
-          <p className="text-[11px] text-gray-400">Switch providers from the dropdown in the top bar.</p>
         </div>
       </div>
 
       {/* Connectivity + counts */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-        {(["permit", "ping"] as const).map((p) => {
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {(["ping"] as const).map((p) => {
           const conn = status.connectivity[p];
           return (
             <div key={p} className="rounded-xl border border-gray-200 bg-white p-4">

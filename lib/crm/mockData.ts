@@ -125,6 +125,32 @@ const SIEMENS_ACCOUNT = buildAccount(
   ]
 );
 
+const BOEING_ACCOUNT = buildAccount(
+  "001ACC006",
+  "Boeing Aerospace",
+  "7813562",
+  "S4H500",
+  "Distributor",
+  ["Process Technology", "Industrial Automation"],
+  [
+    { salesOrg: "PT02", currency: "USD", distributionChannel: "10", division: "P", salesArea: "PT02_10" },
+    { salesOrg: "IA02", currency: "EUR", distributionChannel: "20", division: "I", salesArea: "IA02_20" },
+  ]
+);
+
+const TOYOTA_ACCOUNT = buildAccount(
+  "001ACC007",
+  "Toyota Manufacturing",
+  "8924673",
+  "S4H600",
+  "Partner",
+  ["Building Automation", "Process Automation"],
+  [
+    { salesOrg: "BA02", currency: "USD", distributionChannel: "10", division: "B", salesArea: "BA02_10" },
+    { salesOrg: "PA01", currency: "JPY", distributionChannel: "30", division: "A", salesArea: "PA01_30" },
+  ]
+);
+
 // ---------------------------------------------------------------------------
 // Tool grants
 // ---------------------------------------------------------------------------
@@ -187,7 +213,7 @@ export const CRM_USERS: CrmUser[] = [
     isSuperUser: false,
     activeSalesArea: "BA01_10",
     toolAccess: ALL_TOOLS,
-    accounts: [HONEYWELL_ACCOUNT, WHOLE_FOODS_ACCOUNT, GREENTECH_ACCOUNT, TESLA_ACCOUNT, SIEMENS_ACCOUNT],
+    accounts: [HONEYWELL_ACCOUNT, WHOLE_FOODS_ACCOUNT, GREENTECH_ACCOUNT, TESLA_ACCOUNT, SIEMENS_ACCOUNT, BOEING_ACCOUNT, TOYOTA_ACCOUNT],
   },
   {
     // ── User 2: Carlos Johnson — Buyer with 2 accounts

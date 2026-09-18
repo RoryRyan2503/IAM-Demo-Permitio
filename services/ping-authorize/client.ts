@@ -39,6 +39,13 @@ export interface PingRequestOptions {
   /** Number of retry attempts for transient failures. Default 2. */
   retries?: number;
   /**
+   * Per-attempt connect/response timeout in ms. Kept short (well under
+   * undici's 10s default connect timeout) so an unreachable PDP/PAP host
+   * falls back to the local demo evaluator quickly instead of hanging the
+   * request for 20-30s across retries. Default 5000.
+   */
+  timeoutMs?: number;
+  /**
    * X-Respond-With header value(s). Kept as an opt-in escape hatch for
    * verbosity-control conventions seen elsewhere in PingAuthorize's API
    * family; the grounded JSON PDP API request/response schema (see
@@ -123,7 +130,7 @@ export async function pingRequest<T>(
   path: string,
   options: PingRequestOptions = {}
 ): Promise<T> {
-  const { method = "GET", body, headers = {}, retries = 2, respondWith } = options;
+  const { method = "GET", body, headers = {}, retries = 2, timeoutMs = 5000, respondWith } = options;
 
   const userIdHeader = getUserIdHeader();
   const authHeader = getBasicAuthHeader();
@@ -142,11 +149,14 @@ export async function pingRequest<T>(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
         method,
         headers: requestHeaders,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -162,14 +172,18 @@ export async function pingRequest<T>(
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
-      lastError = error;
+      lastError = controller.signal.aborted
+        ? new Error(`request timed out after ${timeoutMs}ms`)
+        : error;
       if (error instanceof PingAuthorizeError) throw error;
-      // Network-level error (DNS, connection refused, TLS) — retry if attempts remain
+      // Network-level error (DNS, connection refused, TLS, timeout) — retry if attempts remain
       if (attempt < retries) {
-        console.warn(`[PingAuthorize] ${method} ${path} network error, retrying (attempt ${attempt + 1}):`, error);
+        console.warn(`[PingAuthorize] ${method} ${path} network error, retrying (attempt ${attempt + 1}):`, lastError);
         await delay(200 * 2 ** attempt);
         continue;
       }
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

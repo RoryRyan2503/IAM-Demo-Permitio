@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useAccountContext } from "@/context/AccountContext";
 import { useAuth } from "@/context/AuthContext";
+import { useRouteGuard } from "@/hooks/useRouteGuard";
 import { PermissionGate } from "@/components/permissions/PermissionGate";
 import { AccessDenied } from "@/components/permissions/AccessDenied";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,7 @@ export default function CartPage() {
 
 function CartContent() {
   const { selectedAccount } = useAccountContext();
+  useRouteGuard("view", "cart");
   const [items, setItems] = useState<CartItem[]>([]);
   const [meta, setMeta] = useState<CartMeta>({ total: 0, itemCount: 0 });
   const [isLoading, setIsLoading] = useState(false);
