@@ -198,6 +198,7 @@ export interface DecisionResult {
   engine: string;
   reason?: string;
   matchedPolicyId?: string;
+  request?: unknown;
   raw?: unknown;
 }
 
@@ -215,19 +216,24 @@ export interface DecisionResult {
 // this app's internal DecisionRequest is flattened into this format.
 // ---------------------------------------------------------------------------
 
-/** A single JSON PDP API decision request. */
+/**
+ * A single JSON PDP API decision request sent directly to /governance-engine.
+ * This matches the real PingAuthorize wire shape used by the connected tenant.
+ */
 export interface PdpRequest {
-  /** e.g. "Sales.Asia Pacific" — coarse business/organizational grouping */
+  /** Always "HonEcom" for this app. */
   domain?: string;
-  /** e.g. "Retrieve" — the operation being performed */
+  /** "view" | "create" | "update" | "delete" */
   action?: string;
-  /** e.g. "Mobile.Landing page" — the application/service being accessed */
+  /** e.g. "Commerce.Products", "Commerce.Cart", "Commerce.Orders" */
   service?: string;
-  /** e.g. "Social Networks.Spacebook" — source of the caller's identity */
   identityProvider?: string;
-  /** Required (may be {}). Keys must match Trust Framework attribute names configured in the PAP. */
+  /** Only "role": "admin" | "buyer" | "viewer" per the agreed request template. */
   attributes: Record<string, string>;
 }
+
+/** Backward-compatible alias for the direct request payload. */
+export type PdpEnvelope = PdpRequest;
 
 export interface PdpBatchRequest {
   requests: PdpRequest[];
@@ -248,8 +254,8 @@ export interface PdpResponse {
   deploymentPackageId: string;
   timestamp: string;
   elapsedTime: number;
-  /** Uppercase per the real API: "PERMIT" | "DENY" | "INDETERMINATE" (no policy matched / evaluation error). */
-  decision: "PERMIT" | "DENY" | "INDETERMINATE";
+  /** Uppercase per the real API: "PERMIT" | "DENY" | "INDETERMINATE" (evaluation error) | "NOT_APPLICABLE" (no policy Target matched). */
+  decision: "PERMIT" | "DENY" | "INDETERMINATE" | "NOT_APPLICABLE";
   /**
    * NOTE: the real, live PingAuthorize JSON PDP API returns this field as
    * `authorised` (British spelling), NOT `authorized` — verified against a
