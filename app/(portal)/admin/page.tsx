@@ -106,12 +106,6 @@ export default function AdminPage() {
         </div>
         <div className="flex items-center gap-3">
           <ProviderSwitcher onChanged={() => setProviderVersion((v) => v + 1)} />
-          {policy?.source === "permit.io" && (
-            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
-              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-xs font-medium text-green-700">Permit.io Connected</span>
-            </div>
-          )}
         </div>
       </div>
 

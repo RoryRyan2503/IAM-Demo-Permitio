@@ -62,27 +62,25 @@ const ADMIN_RESOURCE_TYPES = new Set(["admin_dashboard", "users", "policy_sets",
 
 /**
  * Flattens this app's internal DecisionRequest (subject/resource/action/
- * environment) into the agreed PingAuthorize JSON PDP API wire envelope:
+ * environment) into the actual PingAuthorize JSON PDP API payload shape:
  *
  *   {
- *     "decisionRequest": {
- *       "domain": "HonEcom",
- *       "service": "Commerce.<Page>",
- *       "identityProvider": "",
- *       "action": "view" | "create" | "update" | "delete",
- *       "attributes": { "role": "admin" | "buyer" | "viewer" }
- *     },
- *     "attributeValueOverrides": {},
- *     "serviceValueOverrides": {}
+ *     "domain": "HonEcom",
+ *     "service": "Commerce.Products",
+ *     "identityProvider": "",
+ *     "action": "view",
+ *     "attributes": {
+ *       "role": "admin"
+ *     }
  *   }
  *
  * `domain` is always the constant "HonEcom". `service` is namespaced per
  * page (`Commerce.Products`, `Commerce.Cart`, `Commerce.Orders`, ... or
  * `Admin.*` for admin-console resources). `attributes` intentionally carries
- * only `role` — no other subject/resource attributes are sent, per the
- * agreed request template.
+ * only `role` — no other subject/resource attributes are sent for the
+ * current PingAuthorize integration.
  */
-export function toTrustFrameworkRequest(request: DecisionRequest): PdpEnvelope {
+export function toTrustFrameworkRequest(request: DecisionRequest): PdpRequest {
   const { subject, resource, action } = request;
 
   const service = ADMIN_RESOURCE_TYPES.has(resource.type)
@@ -90,17 +88,13 @@ export function toTrustFrameworkRequest(request: DecisionRequest): PdpEnvelope {
     : `Commerce.${toPascalCase(resource.type)}`;
 
   return {
-    decisionRequest: {
-      domain: "HonEcom",
-      service,
-      identityProvider: "",
-      action,
-      attributes: {
-        role: subject.role,
-      },
+    domain: "HonEcom",
+    service,
+    identityProvider: "",
+    action,
+    attributes: {
+      role: subject.role,
     },
-    attributeValueOverrides: {},
-    serviceValueOverrides: {},
   };
 }
 
@@ -137,6 +131,7 @@ async function evaluateAccessRemote(request: DecisionRequest): Promise<DecisionR
     effect: authorised || res.decision === "PERMIT" ? "Permit" : "Deny",
     engine: "pingauthorize",
     reason: advice || undefined,
+    request: body,
     raw: res,
   };
 }
@@ -196,6 +191,7 @@ function evaluateAccessLocal(request: DecisionRequest): DecisionResult {
       engine: "pingauthorize-demo",
       reason: `Denied by policy "${denyMatch.name}" (${denyMatch.id})`,
       matchedPolicyId: denyMatch.id,
+      request: request,
     };
   }
 
@@ -206,6 +202,7 @@ function evaluateAccessLocal(request: DecisionRequest): DecisionResult {
       engine: "pingauthorize-demo",
       reason: `Permitted by policy "${permitMatch.name}" (${permitMatch.id})`,
       matchedPolicyId: permitMatch.id,
+      request: request,
     };
   }
 
@@ -213,6 +210,7 @@ function evaluateAccessLocal(request: DecisionRequest): DecisionResult {
     effect: "Deny",
     engine: "pingauthorize-demo",
     reason: "No applicable policy matched — default deny",
+    request: request,
   };
 }
 

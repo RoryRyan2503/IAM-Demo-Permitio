@@ -50,6 +50,31 @@ export interface CheckAccessOptions {
   resourceAttributes?: Record<string, unknown>;
 }
 
+function toPingService(resource: string): string {
+  const formatted = resource.replace(/(^.|_.)/g, (m) => m.replace("_", "").toUpperCase());
+  const isAdminResource =
+    resource.startsWith("admin_") || resource === "users" || resource === "policy_sets" || resource === "policies";
+  return isAdminResource ? `Admin.${formatted}` : `Commerce.${formatted}`;
+}
+
+function buildPingRequestSnapshot(role: string, action: string, resource: string) {
+  return {
+    domain: "HonEcom",
+    service: toPingService(resource),
+    identityProvider: "",
+    action,
+    attributes: {
+      role,
+    },
+  };
+}
+
+function normalizeReason(detail: AuthorizationDecisionDetail): string | undefined {
+  if (detail.reason) return detail.reason;
+  if (detail.error) return detail.error;
+  return `PingAuthorize decision: ${detail.allowed ? "PERMIT" : "DENY"}`;
+}
+
 /**
  * Check whether a user is allowed to perform an action on a resource, using
  * whichever authorization provider is currently active.
@@ -74,6 +99,14 @@ export async function checkAccess(
   try {
     const subject = buildSubject(userId, userRole ?? "viewer", context);
     const detail = await provider.checkAccessDetailed(subject, resource, action, context, resourceAttributes);
+    const actionText = String(action);
+    const resourceText = String(resource);
+    const requestSnapshot =
+      detail.request ??
+      (detail.engine.startsWith("pingauthorize")
+        ? buildPingRequestSnapshot(subject.role, actionText, resourceText)
+        : undefined);
+    const reason = detail.engine.startsWith("pingauthorize") ? normalizeReason(detail) : detail.reason;
 
     _lastAuthEngine = detail.engine;
     setCached(cacheKey, detail.allowed);
@@ -82,12 +115,15 @@ export async function checkAccess(
       provider: provider.getProviderName(),
       engine: detail.engine,
       userId,
-      action: String(action),
-      resource: String(resource),
+      userRole: subject.role,
+      action: actionText,
+      resource: resourceText,
       decision: detail.allowed,
       latencyMs: detail.latencyMs,
-      reason: detail.reason,
+      reason,
       error: detail.error,
+      request: requestSnapshot,
+      response: detail.raw,
     });
 
     return detail.allowed;
@@ -114,17 +150,28 @@ export async function checkAccessDetailed(
   const provider = providerName ? getProviderByName(providerName) : getAuthorizationProvider();
   const subject = buildSubject(userId, userRole ?? "viewer", context);
   const detail = await provider.checkAccessDetailed(subject, resource, action, context);
+  const actionText = String(action);
+  const resourceText = String(resource);
+  const requestSnapshot =
+    detail.request ??
+    (detail.engine.startsWith("pingauthorize")
+      ? buildPingRequestSnapshot(subject.role, actionText, resourceText)
+      : undefined);
+  const reason = detail.engine.startsWith("pingauthorize") ? normalizeReason(detail) : detail.reason;
 
   recordDecision({
     provider: provider.getProviderName(),
     engine: detail.engine,
     userId,
-    action: String(action),
-    resource: String(resource),
+    userRole: subject.role,
+    action: actionText,
+    resource: resourceText,
     decision: detail.allowed,
     latencyMs: detail.latencyMs,
-    reason: detail.reason,
+    reason,
     error: detail.error,
+    request: requestSnapshot,
+    response: detail.raw,
   });
 
   return { ...detail, providerName: provider.getProviderName() };

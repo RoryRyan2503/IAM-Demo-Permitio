@@ -37,7 +37,9 @@ export interface AuthorizationDecisionDetail {
   allowed: boolean;
   /** Which engine actually produced the decision (may differ from the requested provider on fallback) */
   engine: string;
-  /** Provider-specific raw response, useful for the decision testing console */
+  /** Provider-specific raw request payload sent to the backend */
+  request?: unknown;
+  /** Provider-specific raw response payload returned by the backend */
   raw?: unknown;
   /** Human-readable reason, e.g. which rule/condition matched */
   reason?: string;

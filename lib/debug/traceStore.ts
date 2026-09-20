@@ -41,6 +41,8 @@ export interface UpstreamCall {
   status?: number;
   durationMs?: number;
   error?: string;
+  requestBody?: string;
+  responseBody?: string;
 }
 
 const MAX_ENTRIES = 200;
@@ -49,6 +51,7 @@ interface TraceState {
   traces: TraceEntry[];
   counter: number;
   listeners: Array<(entry: TraceEntry) => void>;
+  activeTrace?: TraceEntry | null;
 }
 
 function getState(): TraceState {
@@ -82,12 +85,20 @@ export function createTrace(
     upstreamCalls: [],
     tags: [],
   };
+  state.activeTrace = entry;
   return entry;
+}
+
+export function getCurrentTrace(): TraceEntry | undefined {
+  return getState().activeTrace ?? undefined;
 }
 
 export function finalizeTrace(entry: TraceEntry) {
   const state = getState();
   state.traces.push(entry);
+  if (state.activeTrace?.id === entry.id) {
+    state.activeTrace = null;
+  }
   if (state.traces.length > MAX_ENTRIES) {
     state.traces = state.traces.slice(-MAX_ENTRIES);
   }

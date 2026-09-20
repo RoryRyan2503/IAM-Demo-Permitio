@@ -15,12 +15,15 @@ export interface AuditLogEntry {
   provider: string;
   engine: string;
   userId: string;
+  userRole?: string;
   action: string;
   resource: string;
   decision: boolean;
   latencyMs: number;
   reason?: string;
   error?: string;
+  request?: unknown;
+  response?: unknown;
 }
 
 const MAX_ENTRIES = 500;

@@ -43,6 +43,18 @@ export class PingAuthorizeProvider implements AuthorizationProvider {
     resourceAttributes?: Record<string, unknown>
   ): Promise<AuthorizationDecisionDetail> {
     const start = performance.now();
+    const requestPayload = {
+      domain: "HonEcom",
+      service: resource.startsWith("admin_") || resource === "users" || resource === "policy_sets" || resource === "policies"
+        ? `Admin.${resource.replace(/(^.|_.)/g, (m) => m.replace("_", "").toUpperCase())}`
+        : `Commerce.${resource.replace(/(^.|_.)/g, (m) => m.replace("_", "").toUpperCase())}`,
+      identityProvider: "",
+      action,
+      attributes: {
+        role: subject.role,
+      },
+    };
+
     try {
       const result = await evaluateAccess({
         subject: {
@@ -59,8 +71,9 @@ export class PingAuthorizeProvider implements AuthorizationProvider {
       return {
         allowed: result.effect === "Permit",
         engine: result.engine,
+        request: result.request ?? requestPayload,
         raw: result.raw,
-        reason: result.reason,
+        reason: result.reason ?? `PingAuthorize decision: ${result.effect === "Permit" ? "PERMIT" : "DENY"}`,
         latencyMs: Math.round(performance.now() - start),
       };
     } catch (error) {
@@ -73,6 +86,7 @@ export class PingAuthorizeProvider implements AuthorizationProvider {
       return {
         allowed,
         engine: "pingauthorize-fallback",
+        request: requestPayload,
         reason: "PingAuthorize PDP did not return a usable decision — evaluated via tool-based ReBAC",
         error: message,
         latencyMs: Math.round(performance.now() - start),

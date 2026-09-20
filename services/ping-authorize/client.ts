@@ -1,3 +1,5 @@
+import { getCurrentTrace, type UpstreamCall } from "@/lib/debug/traceStore";
+
 /**
  * PingAuthorize low-level HTTP client
  * ============================================================================
@@ -132,6 +134,16 @@ export async function pingRequest<T>(
 ): Promise<T> {
   const { method = "GET", body, headers = {}, retries = 2, timeoutMs = 5000, respondWith } = options;
 
+  const activeTrace = getCurrentTrace();
+  const requestBodyText = body !== undefined ? JSON.stringify(body) : undefined;
+  const upstreamCall: UpstreamCall = {
+    service: "PingAuthorize",
+    method,
+    url: `${baseUrl.replace(/\/$/, "")}${path}`,
+    requestBody: requestBodyText ? requestBodyText.substring(0, 4000) : undefined,
+  };
+  activeTrace?.upstreamCalls.push(upstreamCall);
+
   const userIdHeader = getUserIdHeader();
   const authHeader = getBasicAuthHeader();
   const requestHeaders: Record<string, string> = {
@@ -152,6 +164,7 @@ export async function pingRequest<T>(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const startedAt = Date.now();
       const res = await fetch(url, {
         method,
         headers: requestHeaders,
@@ -159,22 +172,48 @@ export async function pingRequest<T>(
         signal: controller.signal,
       });
 
+      const durationMs = Date.now() - startedAt;
+      upstreamCall.durationMs = durationMs;
+      upstreamCall.status = res.status;
+
+      let responseText: string | undefined;
+      if (res.status === 204) {
+        responseText = "";
+      } else {
+        try {
+          responseText = await res.text();
+        } catch {
+          responseText = undefined;
+        }
+      }
+
+      if (responseText) {
+        try {
+          const parsed = JSON.parse(responseText);
+          upstreamCall.responseBody = JSON.stringify(parsed, null, 2).substring(0, 4000);
+        } catch {
+          upstreamCall.responseBody = responseText.substring(0, 4000);
+        }
+      }
+
       if (!res.ok) {
-        const errorBody = await res.text().catch(() => undefined);
+        const errorBody = responseText ?? undefined;
         if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
           console.warn(`[PingAuthorize] ${method} ${path} → ${res.status}, retrying (attempt ${attempt + 1})`);
           await delay(200 * 2 ** attempt);
           continue;
         }
+        upstreamCall.error = `HTTP ${res.status}`;
         throw new PingAuthorizeError(`PingAuthorize API error: ${res.status} ${res.statusText}`, res.status, errorBody);
       }
 
       if (res.status === 204) return undefined as T;
-      return (await res.json()) as T;
+      return JSON.parse(responseText ?? "null") as T;
     } catch (error) {
       lastError = controller.signal.aborted
         ? new Error(`request timed out after ${timeoutMs}ms`)
         : error;
+      upstreamCall.error = lastError instanceof Error ? lastError.message : String(lastError);
       if (error instanceof PingAuthorizeError) throw error;
       // Network-level error (DNS, connection refused, TLS, timeout) — retry if attempts remain
       if (attempt < retries) {

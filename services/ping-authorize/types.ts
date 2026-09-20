@@ -198,6 +198,7 @@ export interface DecisionResult {
   engine: string;
   reason?: string;
   matchedPolicyId?: string;
+  request?: unknown;
   raw?: unknown;
 }
 
@@ -215,7 +216,10 @@ export interface DecisionResult {
 // this app's internal DecisionRequest is flattened into this format.
 // ---------------------------------------------------------------------------
 
-/** A single JSON PDP API decision request (nested under `decisionRequest` in the wire envelope). */
+/**
+ * A single JSON PDP API decision request sent directly to /governance-engine.
+ * This matches the real PingAuthorize wire shape used by the connected tenant.
+ */
 export interface PdpRequest {
   /** Always "HonEcom" for this app. */
   domain?: string;
@@ -228,12 +232,8 @@ export interface PdpRequest {
   attributes: Record<string, string>;
 }
 
-/** Full JSON PDP API wire envelope — the exact shape POSTed to /governance-engine. */
-export interface PdpEnvelope {
-  decisionRequest: PdpRequest;
-  attributeValueOverrides: Record<string, string>;
-  serviceValueOverrides: Record<string, string>;
-}
+/** Backward-compatible alias for the direct request payload. */
+export type PdpEnvelope = PdpRequest;
 
 export interface PdpBatchRequest {
   requests: PdpRequest[];

@@ -9,6 +9,8 @@ interface UpstreamCall {
   status?: number;
   durationMs?: number;
   error?: string;
+  requestBody?: string;
+  responseBody?: string;
 }
 
 interface TraceEntry {
@@ -305,29 +307,45 @@ function TraceDetail({ trace }: { trace: TraceEntry }) {
       {/* Upstream Calls */}
       {trace.upstreamCalls.length > 0 && (
         <Section title={`Upstream Calls (${trace.upstreamCalls.length})`}>
-          <div className="space-y-1.5">
+          <div className="space-y-3">
             {trace.upstreamCalls.map((call, i) => (
               <div
                 key={i}
-                className="flex items-center gap-2 px-2 py-1.5 rounded bg-[#161b22] border border-gray-800"
+                className="rounded bg-[#161b22] border border-gray-800 p-2 space-y-2"
               >
-                <span className="text-[10px] font-bold text-cyan-400 w-[90px] shrink-0 truncate">
-                  {call.service}
-                </span>
-                <span className="text-[10px] text-gray-500 w-[32px] shrink-0">{call.method}</span>
-                <span className="text-[10px] text-gray-400 flex-1 truncate">{call.url}</span>
-                {call.status && (
-                  <span className={`text-[10px] font-bold shrink-0 ${statusColor(call.status)}`}>
-                    {call.status}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-bold text-cyan-400 shrink-0 truncate">
+                    {call.service}
                   </span>
+                  <span className="text-[10px] text-gray-500 shrink-0">{call.method}</span>
+                  <span className="text-[10px] text-gray-400 break-all flex-1 min-w-0">{call.url}</span>
+                  {call.status && (
+                    <span className={`text-[10px] font-bold shrink-0 ${statusColor(call.status)}`}>
+                      {call.status}
+                    </span>
+                  )}
+                  {call.durationMs !== undefined && (
+                    <span className="text-[10px] text-gray-600 shrink-0">{call.durationMs}ms</span>
+                  )}
+                  {call.error && (
+                    <span className="text-[10px] text-red-400 truncate max-w-[120px]">
+                      {call.error}
+                    </span>
+                  )}
+                </div>
+
+                {call.requestBody && (
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-gray-500 mb-1">Request</div>
+                    <JsonBlock value={call.requestBody} />
+                  </div>
                 )}
-                {call.durationMs !== undefined && (
-                  <span className="text-[10px] text-gray-600 shrink-0">{call.durationMs}ms</span>
-                )}
-                {call.error && (
-                  <span className="text-[10px] text-red-400 truncate max-w-[120px]">
-                    {call.error}
-                  </span>
+
+                {call.responseBody && (
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-gray-500 mb-1">Response</div>
+                    <JsonBlock value={call.responseBody} />
+                  </div>
                 )}
               </div>
             ))}
