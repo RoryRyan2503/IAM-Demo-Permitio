@@ -16,18 +16,19 @@
  *   PERMIT_PDP_URL  — PDP endpoint URL
  */
 
-import { Permit } from "permitio";
+type PermitClientLike = {
+  check: (...args: unknown[]) => Promise<boolean>;
+};
 
-let permitClient: Permit | null = null;
+let permitClient: PermitClientLike | null = null;
 let isConfigured = false;
 
 /**
- * Get the Permit.io client singleton.
- * Lazily initialized on first call.
- *
- * Returns null if PERMIT_API_KEY is not configured (demo/dev mode).
+ * Return the legacy Permit.io client only if the SDK is actually available.
+ * This repo is now PingAuthorize-first, so the default path is graceful
+ * fallback RBAC instead of crashing during production builds.
  */
-export function getPermitClient(): Permit | null {
+export function getPermitClient(): PermitClientLike | null {
   if (!process.env.PERMIT_API_KEY || process.env.PERMIT_API_KEY.startsWith("permit_key_demo")) {
     if (!isConfigured) {
       console.warn(
@@ -41,14 +42,27 @@ export function getPermitClient(): Permit | null {
   }
 
   if (!permitClient) {
-    permitClient = new Permit({
-      token: process.env.PERMIT_API_KEY,
-      pdp: process.env.PERMIT_PDP_URL ?? "https://cloudpdp.api.permit.io",
-      // Log level: "debug" for development, "error" for production
-      log: {
-        level: process.env.NODE_ENV === "development" ? "info" : "error",
-      },
-    });
+    try {
+      // The Permit.io SDK is intentionally optional in this repo. The app
+      // ships with PingAuthorize enabled by default and should not fail build
+      // when the package is absent.
+      const mod = require("permitio") as { Permit?: new (config: unknown) => PermitClientLike };
+      const PermitCtor = mod.Permit;
+      if (!PermitCtor) {
+        console.warn("[Permit.io] permitio package is not installed in this workspace; legacy Permit checks are disabled.");
+        return null;
+      }
+      permitClient = new PermitCtor({
+        token: process.env.PERMIT_API_KEY,
+        pdp: process.env.PERMIT_PDP_URL ?? "https://cloudpdp.api.permit.io",
+        log: {
+          level: process.env.NODE_ENV === "development" ? "info" : "error",
+        },
+      });
+    } catch {
+      console.warn("[Permit.io] permitio package is not installed; legacy Permit checks are disabled.");
+      return null;
+    }
     isConfigured = true;
   }
 
