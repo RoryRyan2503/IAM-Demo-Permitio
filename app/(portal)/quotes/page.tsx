@@ -41,20 +41,21 @@ const STATUS_COLORS: Record<string, string> = {
 export default function QuotesPage() {
   const { selectedAccount } = useAccountContext();
   const { user } = useAuth();
+  const selectedAccountId = selectedAccount?.accountId;
   useRouteGuard("view", "quotes");
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedAccount) return;
+    if (!selectedAccountId) return;
 
     const fetchQuotes = async () => {
       setIsLoading(true);
       setError(null);
       try {
         const res = await fetch("/api/quotes", {
-          headers: { "x-account-id": selectedAccount.accountId },
+          headers: { "x-account-id": selectedAccountId },
         });
         if (!res.ok) {
           const data = await res.json();
@@ -71,10 +72,7 @@ export default function QuotesPage() {
     };
 
     fetchQuotes();
-    // Depend on the account id (a stable primitive) rather than the
-    // selectedAccount object reference, which some context providers
-    // recreate on every render and would otherwise cause a refetch loop.
-  }, [selectedAccount?.accountId]);
+  }, [selectedAccountId]);
 
   return (
     <div className="space-y-6">

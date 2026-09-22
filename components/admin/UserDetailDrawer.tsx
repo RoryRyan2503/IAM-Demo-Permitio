@@ -293,7 +293,7 @@ export function UserDetailDrawer({
               </div>
               <p className="text-[11px] text-gray-400 leading-snug">
                 Associations are persisted immediately to Supabase (user_accounts).
-                Duplicate associations are rejected by the database's primary key
+                Duplicate associations are rejected by the database&apos;s primary key
                 constraint.
               </p>
             </div>
