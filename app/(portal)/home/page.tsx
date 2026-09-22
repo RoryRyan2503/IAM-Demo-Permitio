@@ -130,8 +130,8 @@ export default function HomePage() {
             <QuickAction
               href="/quotes"
               icon={<FileText className="h-6 w-6" />}
-              label="Invoices & Quotes"
-              description="Access invoices, quotes, and financial documents"
+              label="Quotes"
+              description="Access quotes and pricing agreements"
               color="purple"
             />
           </PermissionGate>

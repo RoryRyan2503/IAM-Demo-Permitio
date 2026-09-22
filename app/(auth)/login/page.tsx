@@ -12,7 +12,7 @@ const PERSONAS = [
     email: "admin@demo.com",
     role: "Admin · Partner",
     tools: ["TL001", "TL003", "TL004", "TL009"],
-    description: "Full access — eCommerce, Orders, Invoices, Support. Two accounts.",
+    description: "Full access — eCommerce, Orders, Quotes, Support. Two accounts.",
   },
   {
     id: "buyer",
@@ -30,7 +30,7 @@ const PERSONAS = [
     email: "viewer@demo.com",
     role: "Customer · Viewer",
     tools: ["TL009"],
-    description: "My Invoices only. No products, orders, or cart.",
+    description: "My Quotes only. No products, orders, or cart.",
   },
 ] as const;
 

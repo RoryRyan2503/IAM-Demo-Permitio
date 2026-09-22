@@ -1,16 +1,18 @@
 "use client";
 
 /**
- * UserDetailDrawer — right-side drawer for a demo user
+ * UserDetailDrawer — right-side drawer for a real Supabase-backed user
  *
- * Tabs: Profile, Attributes, Roles, Accounts, Authorization Preview.
- * The Authorization Preview tab calls /api/admin/test-access so the
- * displayed decisions come from the live PingAuthorize provider rather
- * than a hardcoded role check.
+ * Tabs: Profile (read-only CRM data), Roles (persisted via
+ * PATCH /api/admin/users/[id]), Accounts (sold-to associations persisted via
+ * POST/DELETE /api/admin/users/[id]/accounts), and an Authorization Preview
+ * that calls /api/admin/test-access. All authorization on this screen — and
+ * the mutations it triggers — is role-based only; persona is never read or
+ * sent here.
  */
 
 import { useEffect, useState } from "react";
-import type { DemoUserRecord } from "./UserManagementPanel";
+import type { AdminAccountRef, AdminUserRecord } from "./UserManagementPanel";
 
 const PREVIEW_CHECKS: Array<{ label: string; action: string; resource: string }> = [
   { label: "Can View Products", action: "view", resource: "products" },
@@ -20,29 +22,41 @@ const PREVIEW_CHECKS: Array<{ label: string; action: string; resource: string }>
   { label: "Can Manage Users", action: "manage", resource: "users" },
 ];
 
-type TabKey = "profile" | "attributes" | "roles" | "accounts" | "preview";
+type TabKey = "profile" | "roles" | "accounts" | "preview";
 
 export function UserDetailDrawer({
   user,
   onClose,
-  onSave,
+  onChanged,
 }: {
-  user: DemoUserRecord;
+  user: AdminUserRecord;
   onClose: () => void;
-  onSave: (updated: DemoUserRecord) => void;
+  /** Called after a successful role or account-association mutation so the parent can refetch. */
+  onChanged: () => void | Promise<void>;
 }) {
   const [tab, setTab] = useState<TabKey>("profile");
-  const [draft, setDraft] = useState<DemoUserRecord>(user);
-  const [customAttrs, setCustomAttrs] = useState<Array<{ key: string; value: string }>>(
-    Object.entries(user.customAttributes ?? {}).map(([key, value]) => ({ key, value }))
-  );
+  const [role, setRole] = useState(user.role);
+  const [accounts, setAccounts] = useState<AdminAccountRef[]>(user.accounts);
+  const [allAccounts, setAllAccounts] = useState<AdminAccountRef[]>([]);
+  const [addAccountId, setAddAccountId] = useState("");
+  const [savingRole, setSavingRole] = useState(false);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Record<string, { decision: boolean; reason?: string; engine: string } | null>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
-    setDraft(user);
-    setCustomAttrs(Object.entries(user.customAttributes ?? {}).map(([key, value]) => ({ key, value })));
+    setRole(user.role);
+    setAccounts(user.accounts);
+    setMutationError(null);
   }, [user]);
+
+  useEffect(() => {
+    if (tab !== "accounts" || allAccounts.length > 0) return;
+    fetch("/api/admin/accounts")
+      .then((res) => (res.ok ? res.json() : { data: [] }))
+      .then((data) => setAllAccounts(data.data ?? []))
+      .catch(() => setAllAccounts([]));
+  }, [tab, allAccounts.length]);
 
   useEffect(() => {
     if (tab !== "preview") return;
@@ -56,9 +70,8 @@ export function UserDetailDrawer({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              userId: draft.id,
-              role: draft.role,
-              persona: draft.persona,
+              userId: user.id,
+              role,
               resource: check.resource,
               action: check.action,
             }),
@@ -82,15 +95,72 @@ export function UserDetailDrawer({
     return () => {
       cancelled = true;
     };
-  }, [tab, draft.id, draft.role, draft.persona]);
+  }, [tab, user.id, role]);
 
-  const handleSave = () => {
-    const customAttributes = Object.fromEntries(
-      customAttrs.filter((a) => a.key.trim() !== "").map((a) => [a.key.trim(), a.value])
-    );
-    onSave({ ...draft, customAttributes });
-    onClose();
+  const handleRoleSave = async (newRole: "admin" | "buyer" | "viewer") => {
+    setSavingRole(true);
+    setMutationError(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMutationError(data.error ?? "Failed to update role");
+        return;
+      }
+      setRole(newRole);
+      await onChanged();
+    } catch {
+      setMutationError("Network error while updating role");
+    } finally {
+      setSavingRole(false);
+    }
   };
+
+  const handleAddAccount = async () => {
+    if (!addAccountId) return;
+    setMutationError(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/accounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: addAccountId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMutationError(data.error ?? "Failed to add account association");
+        return;
+      }
+      setAccounts((prev) => [...prev, { id: data.data.accountId, accountName: data.data.accountName }]);
+      setAddAccountId("");
+      await onChanged();
+    } catch {
+      setMutationError("Network error while adding account association");
+    }
+  };
+
+  const handleRemoveAccount = async (accountId: string) => {
+    setMutationError(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/accounts?accountId=${encodeURIComponent(accountId)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMutationError(data.error ?? "Failed to remove account association");
+        return;
+      }
+      setAccounts((prev) => prev.filter((a) => a.id !== accountId));
+      await onChanged();
+    } catch {
+      setMutationError("Network error while removing account association");
+    }
+  };
+
+  const availableToAdd = allAccounts.filter((a) => !accounts.some((existing) => existing.id === a.id));
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -99,14 +169,11 @@ export function UserDetailDrawer({
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-gray-100 px-5 py-4">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#C8102E]/10 text-sm font-bold text-[#C8102E]">
-            {draft.firstName.charAt(0)}
-            {draft.lastName.charAt(0)}
+            {user.name.slice(0, 2).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900 truncate">
-              {draft.firstName} {draft.lastName}
-            </p>
-            <p className="text-xs text-gray-500 truncate">{draft.email}</p>
+            <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+            <p className="text-xs text-gray-500 truncate">{user.email}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
             <CloseIcon />
@@ -117,7 +184,6 @@ export function UserDetailDrawer({
         <div className="flex gap-1 border-b border-gray-100 px-4 pt-2 overflow-x-auto">
           {([
             ["profile", "Profile"],
-            ["attributes", "Attributes"],
             ["roles", "Roles"],
             ["accounts", "Accounts"],
             ["preview", "Authorization Preview"],
@@ -136,72 +202,23 @@ export function UserDetailDrawer({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {tab === "profile" && (
-            <div className="space-y-3">
-              <Field label="First Name" value={draft.firstName} onChange={(v) => setDraft({ ...draft, firstName: v })} />
-              <Field label="Last Name" value={draft.lastName} onChange={(v) => setDraft({ ...draft, lastName: v })} />
-              <Field label="Email" value={draft.email} onChange={(v) => setDraft({ ...draft, email: v })} />
-              <Field label="Company" value={draft.company} onChange={(v) => setDraft({ ...draft, company: v })} />
+          {mutationError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {mutationError}
             </div>
           )}
 
-          {tab === "attributes" && (
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Business Attributes</p>
-                <div className="space-y-3">
-                  <Field label="Sales Organization" value={draft.salesOrg} onChange={(v) => setDraft({ ...draft, salesOrg: v })} />
-                  <Field label="Region" value={draft.region} onChange={(v) => setDraft({ ...draft, region: v })} />
-                  <Field label="Country" value={draft.country} onChange={(v) => setDraft({ ...draft, country: v })} />
-                  <Field label="User Type" value={draft.userType} onChange={(v) => setDraft({ ...draft, userType: v })} />
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Custom Attributes</p>
-                  <button
-                    onClick={() => setCustomAttrs([...customAttrs, { key: "", value: "" }])}
-                    className="text-[11px] font-medium text-[#C8102E] hover:underline"
-                  >
-                    + Add attribute
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {customAttrs.map((attr, idx) => (
-                    <div key={idx} className="flex items-center gap-2">
-                      <input
-                        value={attr.key}
-                        placeholder="key"
-                        onChange={(e) => {
-                          const next = [...customAttrs];
-                          next[idx] = { ...next[idx], key: e.target.value };
-                          setCustomAttrs(next);
-                        }}
-                        className="w-1/2 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-mono"
-                      />
-                      <input
-                        value={attr.value}
-                        placeholder="value"
-                        onChange={(e) => {
-                          const next = [...customAttrs];
-                          next[idx] = { ...next[idx], value: e.target.value };
-                          setCustomAttrs(next);
-                        }}
-                        className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-mono"
-                      />
-                      <button
-                        onClick={() => setCustomAttrs(customAttrs.filter((_, i) => i !== idx))}
-                        className="text-gray-300 hover:text-red-500"
-                      >
-                        <CloseIcon />
-                      </button>
-                    </div>
-                  ))}
-                  {customAttrs.length === 0 && (
-                    <p className="text-[11px] text-gray-400">No custom attributes yet.</p>
-                  )}
-                </div>
-              </div>
+          {tab === "profile" && (
+            <div className="space-y-3">
+              <ReadOnlyField label="Name" value={user.name} />
+              <ReadOnlyField label="Email" value={user.email} />
+              <ReadOnlyField label="Department" value={user.department ?? "—"} />
+              <ReadOnlyField label="Phone" value={user.phone ?? "—"} />
+              <ReadOnlyField label="HON ID" value={user.honId ?? "—"} />
+              <ReadOnlyField label="User Type" value={user.userType ?? "—"} />
+              <p className="text-[11px] text-gray-400 leading-snug pt-1">
+                Profile fields are sourced from Supabase and are read-only here.
+              </p>
             </div>
           )}
 
@@ -212,9 +229,10 @@ export function UserDetailDrawer({
                 {(["viewer", "buyer", "admin"] as const).map((r) => (
                   <button
                     key={r}
-                    onClick={() => setDraft({ ...draft, role: r })}
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold capitalize transition-colors ${
-                      draft.role === r
+                    disabled={savingRole}
+                    onClick={() => handleRoleSave(r)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold capitalize transition-colors disabled:opacity-50 ${
+                      role === r
                         ? "border-[#C8102E] bg-[#C8102E]/5 text-[#C8102E]"
                         : "border-gray-200 text-gray-600 hover:border-gray-300"
                     }`}
@@ -224,45 +242,60 @@ export function UserDetailDrawer({
                 ))}
               </div>
               <p className="text-[11px] text-gray-400 leading-snug">
-                Role changes take effect immediately for future authorization decisions
-                (evaluated live via PingAuthorize).
+                Role changes are persisted immediately to Supabase (users.role) and take
+                effect for future authorization decisions. Authorization here is
+                role-based only — persona is never used to gate this action.
               </p>
             </div>
           )}
 
           {tab === "accounts" && (
             <div className="space-y-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Associated Accounts</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Sold-To Accounts</p>
               <div className="space-y-2">
-                {draft.accounts.map((acc, idx) => (
-                  <div key={idx} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
-                    <span className="flex-1 text-xs font-medium text-gray-800">{acc}</span>
-                    {idx === 0 && (
-                      <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        Primary
-                      </span>
-                    )}
-                    {idx !== 0 && (
-                      <button
-                        onClick={() => {
-                          const accounts = [acc, ...draft.accounts.filter((_, i) => i !== idx)];
-                          setDraft({ ...draft, accounts });
-                        }}
-                        className="text-[10px] font-medium text-gray-400 hover:text-gray-700"
-                      >
-                        Make primary
-                      </button>
-                    )}
+                {accounts.map((acc) => (
+                  <div key={acc.id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
+                    <span className="flex-1 text-xs font-medium text-gray-800">{acc.accountName}</span>
+                    <span className="text-[10px] text-gray-400 font-mono">{acc.id}</span>
                     <button
-                      onClick={() => setDraft({ ...draft, accounts: draft.accounts.filter((_, i) => i !== idx) })}
+                      onClick={() => handleRemoveAccount(acc.id)}
                       className="text-gray-300 hover:text-red-500"
+                      aria-label={`Remove ${acc.accountName}`}
                     >
                       <CloseIcon />
                     </button>
                   </div>
                 ))}
+                {accounts.length === 0 && (
+                  <p className="text-[11px] text-gray-400">No sold-to accounts associated yet.</p>
+                )}
               </div>
-              <AddAccountRow onAdd={(name) => setDraft({ ...draft, accounts: [...draft.accounts, name] })} />
+              <div className="flex items-center gap-2">
+                <select
+                  value={addAccountId}
+                  onChange={(e) => setAddAccountId(e.target.value)}
+                  className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
+                >
+                  <option value="">Select an account to add…</option>
+                  {availableToAdd.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.accountName} ({a.id})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAddAccount}
+                  disabled={!addAccountId}
+                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-[11px] font-medium text-gray-600 disabled:opacity-40 hover:border-[#C8102E]/40 hover:text-[#C8102E]"
+                >
+                  Add Account
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-snug">
+                Associations are persisted immediately to Supabase (user_accounts).
+                Duplicate associations are rejected by the database's primary key
+                constraint.
+              </p>
             </div>
           )}
 
@@ -270,7 +303,7 @@ export function UserDetailDrawer({
             <div className="space-y-2">
               <p className="text-xs text-gray-500 mb-2">
                 Evaluated live from the active authorization provider (PingAuthorize) for role{" "}
-                <span className="font-semibold capitalize">{draft.role}</span>.
+                <span className="font-semibold capitalize">{role}</span>.
               </p>
               {previewLoading ? (
                 <div className="flex items-center gap-2 text-xs text-gray-400 py-6 justify-center">
@@ -315,13 +348,7 @@ export function UserDetailDrawer({
             onClick={onClose}
             className="rounded-lg px-4 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50"
           >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="rounded-lg bg-[#C8102E] px-4 py-2 text-xs font-medium text-white hover:bg-[#a80d26] transition-colors"
-          >
-            Save Changes
+            Close
           </button>
         </div>
       </div>
@@ -329,39 +356,13 @@ export function UserDetailDrawer({
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">{label}</label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:border-[#C8102E]/40 focus:outline-none"
-      />
-    </div>
-  );
-}
-
-function AddAccountRow({ onAdd }: { onAdd: (name: string) => void }) {
-  const [value, setValue] = useState("");
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="New account name"
-        className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs"
-      />
-      <button
-        onClick={() => {
-          if (!value.trim()) return;
-          onAdd(value.trim());
-          setValue("");
-        }}
-        className="rounded-lg border border-gray-200 px-3 py-1.5 text-[11px] font-medium text-gray-600 hover:border-[#C8102E]/40 hover:text-[#C8102E]"
-      >
-        Add Account
-      </button>
+      <p className="mt-1 w-full rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+        {value}
+      </p>
     </div>
   );
 }

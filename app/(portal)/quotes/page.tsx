@@ -71,7 +71,10 @@ export default function QuotesPage() {
     };
 
     fetchQuotes();
-  }, [selectedAccount]);
+    // Depend on the account id (a stable primitive) rather than the
+    // selectedAccount object reference, which some context providers
+    // recreate on every render and would otherwise cause a refetch loop.
+  }, [selectedAccount?.accountId]);
 
   return (
     <div className="space-y-6">

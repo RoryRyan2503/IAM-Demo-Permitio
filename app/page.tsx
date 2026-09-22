@@ -311,7 +311,7 @@ const PERSONAS = [
     name: "Miguel Patel",
     role: "Admin · Partner",
     tools: ["TL001", "TL003", "TL004", "TL009"],
-    description: "Full access — all tools, two accounts (BlueRock + Prime), eCommerce + invoices.",
+    description: "Full access — all tools, two accounts (BlueRock + Prime), eCommerce + quotes.",
   },
   {
     id: "buyer",
@@ -327,7 +327,7 @@ const PERSONAS = [
     name: "Sarah Chen",
     role: "Customer · Viewer",
     tools: ["TL009"],
-    description: "Invoices only. No products, no orders, no cart — limited read-only access.",
+    description: "Quotes only. No products, no orders, no cart — limited read-only access.",
   },
 ];
 

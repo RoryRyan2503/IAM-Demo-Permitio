@@ -322,7 +322,7 @@ export default function DashboardPage() {
               Honeywell Unified Authorization Fabric
             </p>
             <p className="text-xs text-gray-500 leading-relaxed">
-              <strong>Ping Identity</strong> (JWT) → <strong>CRM</strong> (tool grants + sales areas) → <strong>Permit.io</strong> (policy engine).
+              <strong>Ping Identity</strong> (JWT) → <strong>CRM</strong> (tool grants + sales areas) → <strong>Ping Authorize</strong> (policy engine).
               All data on this dashboard is dynamically resolved from your CRM profile and Supabase backend.
             </p>
             {(userContext?.approvedToolIds ?? []).length > 0 && (

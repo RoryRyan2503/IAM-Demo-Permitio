@@ -3,83 +3,31 @@
 /**
  * UserManagementPanel — Admin Console "User Management" tab
  *
- * Demo-scoped user administration: search, sort, quick filters, pagination,
- * and a detail drawer for editing identity / authorization / business /
- * custom attributes. Changes are held in local state (demo environment —
- * no persistence layer for user records yet) but role changes are reflected
- * immediately in the Authorization Preview, which is evaluated live via
- * PingAuthorize (/api/admin/test-access).
+ * Backed entirely by Supabase via /api/admin/users, /api/admin/users/[id]
+ * (role updates), and /api/admin/users/[id]/accounts (sold-to account
+ * associations). No local mock data — all reads/writes hit the database and
+ * this component reflects the persisted result.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { UserDetailDrawer } from "./UserDetailDrawer";
 
-export interface DemoUserRecord {
+export interface AdminAccountRef {
   id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  role: "admin" | "buyer" | "viewer";
-  persona: string;
-  userType: string;
-  company: string;
-  salesOrg: string;
-  region: string;
-  country: string;
-  accounts: string[];
-  status: "Active" | "Inactive";
-  customAttributes?: Record<string, string>;
+  accountName: string;
 }
 
-const INITIAL_USERS: DemoUserRecord[] = [
-  {
-    id: "user-admin",
-    firstName: "Miguel",
-    lastName: "Patel",
-    email: "miguel.patel@honeywell.com",
-    role: "admin",
-    persona: "GBE",
-    userType: "Internal",
-    company: "Honeywell Corporate",
-    salesOrg: "8421",
-    region: "AMER",
-    country: "USA",
-    accounts: ["Honeywell Corporate"],
-    status: "Active",
-    customAttributes: { department: "IT Administration", costCenter: "1001" },
-  },
-  {
-    id: "user-buyer",
-    firstName: "Carlos",
-    lastName: "Rodriguez",
-    email: "carlos.rodriguez@acme.com",
-    role: "buyer",
-    persona: "procurement",
-    userType: "Customer",
-    company: "Acme Industries",
-    salesOrg: "8421",
-    region: "AMER",
-    country: "USA",
-    accounts: ["Acme Industries", "Acme Europe", "Acme Asia"],
-    status: "Active",
-    customAttributes: { department: "procurement", businessUnit: "aerospace" },
-  },
-  {
-    id: "user-viewer",
-    firstName: "Sarah",
-    lastName: "Johnson",
-    email: "sarah.johnson@globalmfg.com",
-    role: "viewer",
-    persona: "general",
-    userType: "Customer",
-    company: "Global Manufacturing",
-    salesOrg: "3050",
-    region: "EMEA",
-    country: "Germany",
-    accounts: ["Global Manufacturing"],
-    status: "Active",
-  },
-];
+export interface AdminUserRecord {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "buyer" | "viewer";
+  phone: string | null;
+  department: string | null;
+  honId: string | null;
+  userType: string | null;
+  accounts: AdminAccountRef[];
+}
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-red-50 text-red-700 border-red-200",
@@ -87,19 +35,44 @@ const ROLE_COLORS: Record<string, string> = {
   viewer: "bg-gray-50 text-gray-600 border-gray-200",
 };
 
-type SortKey = "name" | "role" | "company" | "status";
+type SortKey = "name" | "role" | "accounts";
 type RoleFilter = "all" | "admin" | "buyer" | "viewer";
 
 const PAGE_SIZE = 10;
 
 export function UserManagementPanel() {
-  const [users, setUsers] = useState<DemoUserRecord[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<AdminUserRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<DemoUserRecord | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const loadUsers = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/users");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Failed to load users");
+        return;
+      }
+      const data = await res.json();
+      setUsers(data.data ?? []);
+    } catch {
+      setError("Network error while loading users");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
 
   const filtered = useMemo(() => {
     let rows = users;
@@ -108,17 +81,16 @@ export function UserManagementPanel() {
       const q = search.trim().toLowerCase();
       rows = rows.filter(
         (u) =>
-          `${u.firstName} ${u.lastName}`.toLowerCase().includes(q) ||
+          u.name.toLowerCase().includes(q) ||
           u.email.toLowerCase().includes(q) ||
-          u.company.toLowerCase().includes(q)
+          u.accounts.some((a) => a.accountName.toLowerCase().includes(q))
       );
     }
     const sorted = [...rows].sort((a, b) => {
       let cmp = 0;
-      if (sortKey === "name") cmp = `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
+      if (sortKey === "name") cmp = a.name.localeCompare(b.name);
       else if (sortKey === "role") cmp = a.role.localeCompare(b.role);
-      else if (sortKey === "company") cmp = a.company.localeCompare(b.company);
-      else if (sortKey === "status") cmp = a.status.localeCompare(b.status);
+      else if (sortKey === "accounts") cmp = a.accounts.length - b.accounts.length;
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
@@ -126,6 +98,7 @@ export function UserManagementPanel() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const selected = users.find((u) => u.id === selectedId) ?? null;
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -134,10 +107,6 @@ export function UserManagementPanel() {
       setSortKey(key);
       setSortDir("asc");
     }
-  };
-
-  const handleSave = (updated: DemoUserRecord) => {
-    setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
   };
 
   return (
@@ -174,8 +143,16 @@ export function UserManagementPanel() {
             ))}
           </div>
         </div>
-        <p className="text-xs text-gray-400">{filtered.length} user{filtered.length === 1 ? "" : "s"}</p>
+        <p className="text-xs text-gray-400">
+          {isLoading ? "Loading…" : `${filtered.length} user${filtered.length === 1 ? "" : "s"}`}
+        </p>
       </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+          {error}
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -184,48 +161,52 @@ export function UserManagementPanel() {
             <tr className="bg-gray-50 border-b border-gray-200">
               <SortableHeader label="User" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
               <SortableHeader label="Role" active={sortKey === "role"} dir={sortDir} onClick={() => toggleSort("role")} />
-              <SortableHeader label="Account" active={sortKey === "company"} dir={sortDir} onClick={() => toggleSort("company")} />
-              <SortableHeader label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggleSort("status")} />
+              <SortableHeader label="Sold-To Accounts" active={sortKey === "accounts"} dir={sortDir} onClick={() => toggleSort("accounts")} />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {pageRows.map((u) => (
-              <tr
-                key={u.id}
-                onClick={() => setSelected(u)}
-                className="cursor-pointer hover:bg-gray-50/70 transition-colors"
-              >
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#C8102E]/10 text-xs font-bold text-[#C8102E]">
-                      {u.firstName.charAt(0)}
-                      {u.lastName.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-gray-800 truncate">
-                        {u.firstName} {u.lastName}
-                      </p>
-                      <p className="text-[10px] text-gray-400 truncate">{u.email}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold capitalize border ${ROLE_COLORS[u.role]}`}>
-                    {u.role}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs text-gray-700">{u.company}</td>
-                <td className="px-4 py-3">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    {u.status}
-                  </span>
+            {isLoading && (
+              <tr>
+                <td colSpan={3} className="px-4 py-10 text-center text-xs text-gray-400">
+                  Loading users from Supabase…
                 </td>
               </tr>
-            ))}
-            {pageRows.length === 0 && (
+            )}
+            {!isLoading &&
+              pageRows.map((u) => (
+                <tr
+                  key={u.id}
+                  onClick={() => setSelectedId(u.id)}
+                  className="cursor-pointer hover:bg-gray-50/70 transition-colors"
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#C8102E]/10 text-xs font-bold text-[#C8102E]">
+                        {u.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-gray-800 truncate">{u.name}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{u.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold capitalize border ${ROLE_COLORS[u.role]}`}>
+                      {u.role}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-700">
+                    {u.accounts.length === 0 ? (
+                      <span className="text-gray-400">No accounts</span>
+                    ) : (
+                      u.accounts.map((a) => a.accountName).join(", ")
+                    )}
+                  </td>
+                </tr>
+              ))}
+            {!isLoading && pageRows.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-xs text-gray-400">
+                <td colSpan={3} className="px-4 py-10 text-center text-xs text-gray-400">
                   No users match your filters.
                 </td>
               </tr>
@@ -258,7 +239,7 @@ export function UserManagementPanel() {
       </div>
 
       {selected && (
-        <UserDetailDrawer user={selected} onClose={() => setSelected(null)} onSave={handleSave} />
+        <UserDetailDrawer user={selected} onClose={() => setSelectedId(null)} onChanged={loadUsers} />
       )}
     </div>
   );

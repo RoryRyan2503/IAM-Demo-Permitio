@@ -21,7 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Account Dashboard",  icon: <DashIcon /> },
   { href: "/products",  label: "Products",           icon: <CubeIcon />,      action: "view", resource: "products", toolId: "TL001" },
   { href: "/orders",    label: "Orders",             icon: <ClipIcon />,      action: "view", resource: "orders",   toolId: "TL003" },
-  { href: "/quotes",    label: "Invoices",           icon: <DocIcon />,       action: "view", resource: "quotes",   toolId: "TL009" },
+  { href: "/quotes",    label: "Quotes",             icon: <DocIcon />,       action: "view", resource: "quotes",   toolId: "TL009" },
   { href: "/cart",      label: "Cart",               icon: <CartIcon />,      action: "view", resource: "cart",     toolId: "TL001" },
   { href: "/admin",     label: "Admin Console",     icon: <ShieldIcon />,    adminOnly: true },
 ];

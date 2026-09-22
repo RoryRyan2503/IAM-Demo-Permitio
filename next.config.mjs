@@ -18,6 +18,12 @@ const nextConfig = {
   experimental: {
     instrumentationHook: true,
   },
+  async redirects() {
+    return [
+      // "Invoices" was renamed to "Quotes"; preserve any existing /invoices links.
+      { source: "/invoices", destination: "/quotes", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;
