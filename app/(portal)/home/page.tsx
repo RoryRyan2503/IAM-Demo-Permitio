@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useAccountContext } from "@/context/AccountContext";
 import { PermissionGate } from "@/components/permissions/PermissionGate";
+import { ToolsAvailable } from "@/components/layout/ToolsAvailable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -137,6 +138,8 @@ export default function HomePage() {
           </PermissionGate>
         </div>
       </div>
+
+      <ToolsAvailable />
 
       {/* ── Division Overview ───────────────────────── */}
       <div>

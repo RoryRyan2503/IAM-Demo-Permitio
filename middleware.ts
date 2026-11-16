@@ -19,7 +19,7 @@ import { decodeJwt } from "jose";
 import type { AuthSession } from "@/types";
 
 // Routes that don't require authentication
-const PUBLIC_ROUTES = ["/login", "/api/auth/login", "/api/auth/callback", "/403", "/access-denied"];
+const PUBLIC_ROUTES = ["/login", "/api/auth/login", "/api/auth/idp-login", "/api/auth/mock-idp-users", "/api/auth/callback", "/403", "/access-denied"];
 // Routes that require admin role
 const ADMIN_ROUTES = ["/admin"];
 

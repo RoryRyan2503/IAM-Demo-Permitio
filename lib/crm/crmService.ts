@@ -1,11 +1,15 @@
 /**
- * CRM Service — Supabase-first, mockData fallback
+ * CRM Service — two clearly separated entitlement paths
  *
- * Primary : queries Supabase (users, user_accounts, account_sales_areas,
- *           user_tool_access) — seeded by migration 003_crm_tables.sql
- * Fallback: if user not found in DB, falls back to mockData.
- *
+ * Legacy demo users (Miguel/Sarah/Carlos) : Supabase-first, mockData fallback
  *   JWT (identity) → Supabase CRM tables → Authorization Engine
+ *
+ * Local-mock-IDP users (the 50 imported DynamoDB users) : DynamoDB only,
+ *   never duplicated into Supabase/mockData — see dynamoEntitlementService.ts
+ *   JWT sub (userId) → DynamoDB → Authorization Engine
+ *
+ * getUserContext() is the single entry point both paths funnel through, so
+ * every existing caller (validateRequest, AccountContext, etc.) needs no changes.
  */
 
 import type {
@@ -22,12 +26,14 @@ import {
   CRM_USERS_BY_EMAIL,
   type CrmUser,
 } from "./mockData";
+import { isDynamoIdpUser } from "@/lib/auth/dynamoUsers";
+import { getUserContextFromDynamo, userHasAccountAccessDynamo } from "./dynamoEntitlementService";
 
 // ---------------------------------------------------------------------------
 // Data source tracking
 // ---------------------------------------------------------------------------
 
-export type DataSource = "supabase" | "mock" | "unknown";
+export type DataSource = "supabase" | "mock" | "dynamodb" | "unknown";
 
 let _lastDataSource: DataSource = "unknown";
 
@@ -282,6 +288,7 @@ function buildContextFromMock(
 
 // ---------------------------------------------------------------------------
 // Public API — async, Supabase-first with mockData fallback
+// (legacy demo users) or DynamoDB-only (the 50 local-mock-IDP users)
 // ---------------------------------------------------------------------------
 
 export async function getUserContext(
@@ -289,6 +296,11 @@ export async function getUserContext(
   email?: string,
   selectedAccountId?: string
 ): Promise<UserContext> {
+  if (isDynamoIdpUser(userId)) {
+    _lastDataSource = "dynamodb";
+    return getUserContextFromDynamo(userId, selectedAccountId);
+  }
+
   try {
     const db = await fetchUserFromDB(userId);
     if (db) {
@@ -311,6 +323,10 @@ export async function userHasAccountAccess(
   userId: string,
   accountId: string
 ): Promise<boolean> {
+  if (isDynamoIdpUser(userId)) {
+    return userHasAccountAccessDynamo(userId, accountId);
+  }
+
   try {
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase

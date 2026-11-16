@@ -148,6 +148,11 @@ export function Navbar() {
               <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
               Supabase
             </span>
+          ) : dataSource === "dynamodb" ? (
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-orange-50 px-2.5 py-1 text-[11px] font-medium text-orange-700 border border-orange-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+              DynamoDB
+            </span>
           ) : dataSource === "mock" ? (
             <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-600 border border-gray-200">
               <span className="h-1.5 w-1.5 rounded-full bg-gray-400" />
@@ -188,6 +193,7 @@ export function Navbar() {
                     <Attr label="Persona" value={user.persona} />
                     <Attr label="Type" value={(user as any).userType ?? "—"} />
                     <Attr label="Hon ID" value={(user as any).honId ?? "—"} mono />
+                    <Attr label="User ID" value={user.id} mono />
                   </div>
                 </div>
                 <div className="p-2">

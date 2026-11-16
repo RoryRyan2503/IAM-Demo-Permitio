@@ -39,7 +39,7 @@ interface UserProfile {
 }
 
 export type AuthEngine = "permit.io" | "fallback" | "unknown";
-export type DataSource = "supabase" | "mock" | "unknown";
+export type DataSource = "supabase" | "mock" | "dynamodb" | "unknown";
 
 interface AuthContextValue {
   session: AuthSession | null;

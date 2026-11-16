@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { UserDetailDrawer } from "./UserDetailDrawer";
+import { DynamoUserManagementPanel } from "./DynamoUserManagementPanel";
 
 export interface AdminAccountRef {
   id: string;
@@ -41,6 +42,24 @@ type RoleFilter = "all" | "admin" | "buyer" | "viewer";
 const PAGE_SIZE = 10;
 
 export function UserManagementPanel() {
+  const [source, setSource] = useState<"supabase" | "dynamodb">("supabase");
+  return (
+    <div className="space-y-5">
+      <div role="tablist" aria-label="User data source" className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-1">
+        {(["supabase", "dynamodb"] as const).map((option) => (
+          <button key={option} type="button" role="tab" aria-selected={source === option}
+            onClick={() => setSource(option)}
+            className={`rounded px-4 py-2 text-xs font-semibold ${source === option ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-800"}`}>
+            {option === "supabase" ? "Supabase Users" : "DynamoDB Users"}
+          </button>
+        ))}
+      </div>
+      {source === "supabase" ? <SupabaseUsers /> : <DynamoUserManagementPanel />}
+    </div>
+  );
+}
+
+function SupabaseUsers() {
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
