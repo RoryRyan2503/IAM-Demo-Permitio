@@ -7,7 +7,7 @@
  *   1. Validate session → get user context
  *   2. canAccess(view, products) — RBAC check
  *   3. Determine allowed sales orgs from CRM context (ABAC)
- *   4. Query Supabase with .in('sales_org_id', allowedSalesOrgs)
+ *   4. Query Coveo using the user's authorized sales-area context
  *   5. If user lacks view_pricing — mask price field
  *
  * This demonstrates DATA-LEVEL authorization:
@@ -20,8 +20,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateRequest, authErrorResponse } from "@/lib/api/validateRequest";
 import { canAccess } from "@/lib/authorization/canAccess";
-import { maskProductPricing } from "@/lib/authorization/filterByPermission";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { CoveoApiError } from "@/services/coveo/client";
+import { searchCatalogProducts } from "@/services/catalog/productSearch";
 
 export async function GET(req: NextRequest) {
   try {
@@ -39,39 +39,31 @@ export async function GET(req: NextRequest) {
       session.userId, "view_pricing", "products", permitContext, user.role
     );
 
-    // Build filtered Supabase query
-    const supabase = getSupabaseServerClient();
-
-    // Apply sales org filter — data-level authorization
-    const salesOrgFilter =
-      selectedSalesOrgs.length > 0 ? selectedSalesOrgs : ["__no_access__"];
-
-    const { data: products, error } = await supabase
-      .from("products")
-      .select(
-        "id, name, description, price, sku, sales_org_id, category, image_url, created_at"
-      )
-      .in("sales_org_id", salesOrgFilter)
-      .order("category", { ascending: true })
-      .order("name", { ascending: true });
-
-    if (error) {
-      console.error("[GET /api/products] Supabase error:", error);
-      return NextResponse.json({ error: "Failed to fetch products" }, { status: 500 });
-    }
-
-    // Mask pricing if user lacks view_pricing permission
-    const result = maskProductPricing(products ?? [], canViewPricing);
+    const result = await searchCatalogProducts({
+      session,
+      userContext,
+      query: req.nextUrl.searchParams.get("q") ?? "",
+      userAgent: req.headers.get("user-agent") ?? "",
+      referer: req.headers.get("referer") ?? "",
+    });
+    const products = canViewPricing
+      ? result.products
+      : result.products.map((product) => ({ ...product, price: null }));
 
     return NextResponse.json({
-      data: result,
+      data: products,
       meta: {
-        total: result.length,
+        total: result.total,
         allowedSalesOrgs: selectedSalesOrgs,
         pricingVisible: canViewPricing,
+        sources: result.sources,
+        warnings: result.warnings,
       },
     });
   } catch (error) {
+    if (error instanceof CoveoApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    }
     const { message, status } = authErrorResponse(error);
     return NextResponse.json({ error: message }, { status });
   }

@@ -41,6 +41,10 @@ export function getLastDataSource(): DataSource {
   return _lastDataSource;
 }
 
+function usesDynamoEntitlements(userId: string): boolean {
+  return process.env.DYNAMODB_ENTITLEMENTS_ENABLED === "true" || isDynamoIdpUser(userId);
+}
+
 // ---------------------------------------------------------------------------
 // Supabase CRM lookup
 // ---------------------------------------------------------------------------
@@ -296,7 +300,7 @@ export async function getUserContext(
   email?: string,
   selectedAccountId?: string
 ): Promise<UserContext> {
-  if (isDynamoIdpUser(userId)) {
+  if (usesDynamoEntitlements(userId)) {
     _lastDataSource = "dynamodb";
     return getUserContextFromDynamo(userId, selectedAccountId);
   }
@@ -323,7 +327,7 @@ export async function userHasAccountAccess(
   userId: string,
   accountId: string
 ): Promise<boolean> {
-  if (isDynamoIdpUser(userId)) {
+  if (usesDynamoEntitlements(userId)) {
     return userHasAccountAccessDynamo(userId, accountId);
   }
 

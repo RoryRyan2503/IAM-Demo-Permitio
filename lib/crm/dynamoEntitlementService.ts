@@ -203,7 +203,7 @@ export async function getUserContextFromDynamo(
     console.warn(
       `[dynamoEntitlementService] DYNAMODB_REGION/DYNAMODB_TABLE_PREFIX not set — returning no entitlements for ${userId}`
     );
-    return emptyContext(userId);
+    throw Object.assign(new Error("DynamoDB is not configured. Check the AWS region and table settings."), { statusCode: 503 });
   }
 
   try {
@@ -216,7 +216,7 @@ export async function getUserContextFromDynamo(
     const userItem = userRows[0];
     if (!userItem) {
       console.warn(`[dynamoEntitlementService] No users record found for userId=${userId}`);
-      return emptyContext(userId);
+      throw Object.assign(new Error("No DynamoDB profile matches the signed-in user. Check the identity mapping."), { statusCode: 404 });
     }
 
     const soldToMap = await getSoldToMap();
@@ -271,7 +271,11 @@ export async function getUserContextFromDynamo(
       `[dynamoEntitlementService] DynamoDB lookup failed for userId=${userId}:`,
       err instanceof Error ? err.message : err
     );
-    return emptyContext(userId);
+    if (err instanceof Error && "statusCode" in err && err.statusCode === 404) throw err;
+    const expired = err instanceof Error && /expired|ExpiredToken/i.test(`${err.name} ${err.message}`);
+    throw Object.assign(new Error(expired
+      ? "AWS session credentials have expired. Refresh the access key, secret key and session token in .env.local, then restart the app."
+      : "Unable to load your profile from DynamoDB. Check AWS credentials, connectivity and table permissions."), { statusCode: 503 });
   }
 }
 

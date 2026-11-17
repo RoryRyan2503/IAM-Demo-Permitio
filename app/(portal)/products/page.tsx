@@ -33,18 +33,20 @@ import { cn, formatCurrency, getCategoryColor, getProductType, getSalesOrgStyle 
 import { toast } from "sonner";
 
 /* ------------------------------------------------------------------ */
-/* Types for the raw API response (snake_case from Supabase)           */
+/* Product shape normalized by the Coveo API route                     */
 /* ------------------------------------------------------------------ */
 interface ApiProduct {
   id: string;
   name: string;
   description: string;
-  price: number;
+  price: number | null;
   sku: string;
   sales_org_id: string;
   category: string;
+  currency: string;
   image_url: string | null;
   created_at: string;
+  source?: string;
 }
 
 export default function ProductsPage() {
@@ -59,6 +61,9 @@ function ProductsContent() {
   const { selectedAccount } = useAccountContext();
   const { hasPermission } = useAuth();
   const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [productsTotal, setProductsTotal] = useState(0);
+  const [dataSources, setDataSources] = useState<string[]>([]);
+  const [sourceWarnings, setSourceWarnings] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pricingVisible, setPricingVisible] = useState(true);
@@ -77,31 +82,46 @@ function ProductsContent() {
   /* ---------------------------------------------------------------- */
   /* Fetch products                                                    */
   /* ---------------------------------------------------------------- */
+  const selectedAccountId = selectedAccount?.accountId;
+
   useEffect(() => {
-    if (!selectedAccount) return;
-    const fetchProducts = async () => {
+    if (!selectedAccountId) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/products", {
-          headers: { "x-account-id": selectedAccount.accountId },
+        const params = new URLSearchParams();
+        if (searchQuery.trim()) params.set("q", searchQuery.trim());
+        const queryString = params.toString();
+        const res = await fetch(`/api/products${queryString ? `?${queryString}` : ""}`, {
+          headers: { "x-account-id": selectedAccountId },
+          signal: controller.signal,
         });
         if (!res.ok) {
           const data = await res.json();
           setError(data.error ?? "Failed to load products");
+          setProducts([]);
           return;
         }
         const data = await res.json();
         setProducts(data.data ?? []);
+        setProductsTotal(data.meta?.total ?? data.data?.length ?? 0);
+        setDataSources(data.meta?.sources ?? []);
+        setSourceWarnings(data.meta?.warnings ?? []);
         setPricingVisible(data.meta?.pricingVisible ?? true);
-      } catch {
+      } catch (fetchError) {
+        if (controller.signal.aborted) return;
         setError("Network error — could not load products");
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
+    }, 300);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
     };
-    fetchProducts();
-  }, [selectedAccount]);
+  }, [selectedAccountId, searchQuery]);
 
   /* ---------------------------------------------------------------- */
   /* Derived filter options                                            */
@@ -167,7 +187,7 @@ function ProductsContent() {
             "Content-Type": "application/json",
             "x-account-id": selectedAccount.accountId,
           },
-          body: JSON.stringify({ productId: product.id, quantity: 1 }),
+          body: JSON.stringify({ productId: product.id, sku: product.sku, quantity: 1 }),
         });
         if (res.ok) {
           toast.success("Added to cart", { description: product.name });
@@ -291,6 +311,9 @@ function ProductsContent() {
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {dataSources.map((source) => (
+              <Badge key={source} variant="outline" className="text-[10px]">{source}</Badge>
+            ))}
             {selectedAccount && (
               <Badge variant="secondary" className="font-mono text-[11px]">
                 {selectedAccount.accountName}
@@ -309,6 +332,9 @@ function ProductsContent() {
       </div>
 
       {error && <AccessDenied compact message={error} />}
+      {sourceWarnings.length > 0 && (
+        <p className="text-xs text-amber-700" role="status">{sourceWarnings.join(" ")}</p>
+      )}
 
       {/* ── Toolbar ── */}
       <div className="flex flex-col gap-3">
@@ -516,7 +542,7 @@ function ProductsContent() {
 
           {!isLoading && filtered.length > 0 && (
             <p className="text-xs text-muted-foreground mt-4">
-              Showing {filtered.length} of {products.length} products
+              Showing {filtered.length} of {productsTotal} products
             </p>
           )}
         </div>
@@ -575,8 +601,11 @@ function ProductCardGrid({
       {/* Content */}
       <div className="p-5 flex flex-col gap-3 flex-1">
         <div>
-          <p className="font-mono text-[10px] text-muted-foreground">{product.sku}</p>
-          <Link href={`/products/${product.id}`}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-mono text-[10px] text-muted-foreground">{product.sku}</p>
+            {product.source && <Badge variant="outline" className="text-[9px]">{product.source}</Badge>}
+          </div>
+          <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`}>
             <h3 className="text-sm font-semibold mt-0.5 group-hover:text-primary transition-colors line-clamp-2">
               {product.name}
             </h3>
@@ -591,7 +620,7 @@ function ProductCardGrid({
         <div className="border-t border-border/50 mt-auto pt-3 flex items-end justify-between">
           <span className="font-mono text-lg font-semibold">
             {pricingVisible ? (
-              formatCurrency(product.price)
+              product.price !== null ? formatCurrency(product.price, product.currency) : "Price unavailable"
             ) : (
               <span className="text-sm text-muted-foreground">Price hidden</span>
             )}
@@ -600,7 +629,7 @@ function ProductCardGrid({
         </div>
 
         <div className="flex gap-2">
-          <Link href={`/products/${product.id}`} className="flex-1">
+          <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`} className="flex-1">
             <Button
               variant="outline"
               className="w-full group-hover:border-primary/50 group-hover:bg-primary/5 text-xs"
@@ -663,11 +692,12 @@ function ProductCardList({
           <span className="font-mono text-[10px] text-muted-foreground">
             {product.sku}
           </span>
+          {product.source && <Badge variant="outline" className="text-[9px]">{product.source}</Badge>}
           <Badge variant="secondary" className="text-[10px]">
             {type}
           </Badge>
         </div>
-        <Link href={`/products/${product.id}`}>
+        <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`}>
           <h3 className="text-sm font-semibold group-hover:text-primary transition-colors line-clamp-1">
             {product.name}
           </h3>
@@ -681,7 +711,9 @@ function ProductCardList({
       <div className="shrink-0 text-right hidden sm:block">
         <p className="text-[10px] text-muted-foreground uppercase">List price</p>
         <p className="font-mono font-semibold">
-          {pricingVisible ? formatCurrency(product.price) : "—"}
+          {pricingVisible && product.price !== null
+            ? formatCurrency(product.price, product.currency)
+            : "—"}
         </p>
       </div>
 
@@ -706,7 +738,7 @@ function ProductCardList({
         </Button>
       )}
 
-      <Link href={`/products/${product.id}`} className="shrink-0">
+      <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`} className="shrink-0">
         <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
       </Link>
     </div>

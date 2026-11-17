@@ -33,12 +33,14 @@ interface ApiProduct {
   id: string;
   name: string;
   description: string;
-  price: number;
+  price: number | null;
   sku: string;
   sales_org_id: string;
   category: string;
+  currency: string;
   image_url: string | null;
   created_at: string;
+  source?: string;
 }
 
 export default function ProductDetailPage() {
@@ -100,7 +102,7 @@ function ProductDetailContent() {
           "Content-Type": "application/json",
           "x-account-id": selectedAccount.accountId,
         },
-        body: JSON.stringify({ productId: product.id, quantity }),
+        body: JSON.stringify({ productId: product.id, sku: product.sku, quantity }),
       });
       if (res.ok) {
         toast.success(`Added ${quantity}× to cart`, { description: product.name });
@@ -184,6 +186,7 @@ function ProductDetailContent() {
             <Badge variant="secondary" className="font-mono text-[11px]">
               {product.sales_org_id}
             </Badge>
+            {product.source && <Badge variant="outline" className="text-[11px]">{product.source}</Badge>}
           </div>
 
           {/* Title & description */}
@@ -277,7 +280,7 @@ function ProductDetailContent() {
               <p className="text-xs text-muted-foreground">List price</p>
               <p className="font-mono text-2xl font-semibold mt-1">
                 {pricingVisible ? (
-                  formatCurrency(product.price)
+                  product.price !== null ? formatCurrency(product.price, product.currency) : "Price unavailable"
                 ) : (
                   <span className="text-base text-muted-foreground">
                     Contact for pricing
@@ -314,11 +317,11 @@ function ProductDetailContent() {
                 </div>
 
                 {/* Line total */}
-                {pricingVisible && quantity > 1 && (
+                {pricingVisible && product.price !== null && quantity > 1 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Line total</span>
                     <span className="font-mono font-semibold">
-                      {formatCurrency(product.price * quantity)}
+                      {formatCurrency(product.price * quantity, product.currency)}
                     </span>
                   </div>
                 )}

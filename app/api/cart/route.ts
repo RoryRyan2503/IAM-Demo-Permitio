@@ -77,25 +77,36 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { productId, quantity = 1 } = body as {
-      productId: string;
+    const { productId, sku, quantity = 1 } = body as {
+      productId?: string;
+      sku?: string;
       quantity?: number;
     };
 
-    if (!productId) {
-      return NextResponse.json({ error: "productId is required" }, { status: 400 });
+    if (!productId && !sku) {
+      return NextResponse.json({ error: "productId or sku is required" }, { status: 400 });
     }
 
     const supabase = getSupabaseServerClient();
+    let product = null;
+    if (productId) {
+      const { data } = await supabase
+        .from("products")
+        .select("id, name, price, sku")
+        .eq("id", productId)
+        .maybeSingle();
+      product = data;
+    }
+    if (!product && sku) {
+      const { data } = await supabase
+        .from("products")
+        .select("id, name, price, sku")
+        .eq("sku", sku)
+        .maybeSingle();
+      product = data;
+    }
 
-    // Look up the product to get denormalized fields for cart_items
-    const { data: product, error: productError } = await supabase
-      .from("products")
-      .select("name, price, sku")
-      .eq("id", productId)
-      .single();
-
-    if (productError || !product) {
+    if (!product) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
@@ -106,7 +117,7 @@ export async function POST(req: NextRequest) {
         {
           user_id: session.userId,
           account_id: selectedAccount.accountId,
-          product_id: productId,
+          product_id: product.id,
           product_name: product.name,
           product_sku: product.sku,
           unit_price: product.price,
