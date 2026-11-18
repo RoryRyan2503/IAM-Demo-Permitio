@@ -18,8 +18,8 @@
  * change during the migration. New code should prefer importing
  * `AuthorizationService` directly from "./AuthorizationService".
  *
- * Security: FAIL CLOSED — returns false on any error (enforced inside
- * AuthorizationService).
+ * Security: FAIL CLOSED — an unavailable PDP throws a 503 error; other
+ * unexpected errors return false (enforced inside AuthorizationService).
  */
 
 import type { PermissionAction, PermissionResource, PermitContext, UserRole } from "@/types";

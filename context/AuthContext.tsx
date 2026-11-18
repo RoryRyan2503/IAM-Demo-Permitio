@@ -23,6 +23,7 @@ import React, {
   useState,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import type { AuthSession, PermissionMap, UserRole, UserPersona } from "@/types";
 
@@ -40,7 +41,7 @@ interface UserProfile {
   persona: UserPersona;
 }
 
-export type AuthEngine = "permit.io" | "fallback" | "unknown";
+export type AuthEngine = "pingauthorize" | "pingauthorize-demo" | "mixed" | "unknown";
 export type DataSource = "supabase" | "mock" | "dynamodb" | "unknown";
 
 interface AuthContextValue {
@@ -50,11 +51,12 @@ interface AuthContextValue {
   authEngine: AuthEngine;
   dataSource: DataSource;
   isLoading: boolean;
+  permissionError: string | null;
   isAuthenticated: boolean;
   login: (persona?: "admin" | "buyer" | "viewer") => void;
   logout: () => Promise<void>;
   hasPermission: (action: string, resource: string) => boolean;
-  refreshPermissions: () => Promise<void>;
+  refreshPermissions: (accountId?: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,37 +84,82 @@ export function AuthProvider({
   const [authEngine, setAuthEngine] = useState<AuthEngine>("unknown");
   const [dataSource, setDataSource] = useState<DataSource>("unknown");
   const [isLoading, setIsLoading] = useState(true);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const selectedAccountId = useRef<string | undefined>();
+  const pendingRequest = useRef<{
+    accountId?: string;
+    controller: AbortController;
+    promise: Promise<void>;
+  } | null>(null);
 
   // ------------------------------------------------------------------
   // Fetch permissions + user from /api/auth/permissions
   // ------------------------------------------------------------------
   const fetchPermissions = useCallback(
-    async (accountId?: string) => {
-      try {
-        const headers: Record<string, string> = {};
-        if (accountId) {
-          headers["x-account-id"] = accountId;
-        }
-
-        const res = await fetch("/api/auth/permissions", { headers });
-
-        if (res.status === 401) {
-          setSession(null);
-          setUser(null);
-          setPermissions({});
-          return;
-        }
-
-        if (!res.ok) return;
-
-        const data = await res.json();
-        setUser(data.user);
-        setPermissions(data.permissions ?? {});
-        setAuthEngine(data.authEngine ?? "unknown");
-        setDataSource(data.dataSource ?? "unknown");
-      } catch {
-        // Network error or server down — silent fail
+    (accountId?: string): Promise<void> => {
+      const requestedAccountId = accountId ?? selectedAccountId.current;
+      const pending = pendingRequest.current;
+      if (pending && !pending.controller.signal.aborted && pending.accountId === requestedAccountId) {
+        return pending.promise;
       }
+
+      pending?.controller.abort();
+      if (requestedAccountId !== selectedAccountId.current) {
+        setPermissions({});
+        setIsLoading(true);
+      }
+      selectedAccountId.current = requestedAccountId;
+      const controller = new AbortController();
+
+      const promise = (async () => {
+        try {
+          const headers: Record<string, string> = {};
+          if (requestedAccountId) headers["x-account-id"] = requestedAccountId;
+          const res = await fetch("/api/auth/permissions", {
+            headers,
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          if (controller.signal.aborted) return;
+
+          if (res.status === 401) {
+            setSession(null);
+            setUser(null);
+            setPermissions({});
+            setPermissionError(null);
+            selectedAccountId.current = undefined;
+            return;
+          }
+
+          const data = await res.json();
+          if (controller.signal.aborted) return;
+          if (!res.ok) throw new Error(data.error ?? "Unable to refresh permissions.");
+          if (!data.user?.id || !data.permissions || typeof data.permissions !== "object"
+              || Array.isArray(data.permissions) || Object.keys(data.permissions).length === 0
+              || Object.values(data.permissions).some((value) => typeof value !== "boolean")) {
+            throw new Error("The permissions service returned an invalid response.");
+          }
+
+          selectedAccountId.current = data.selectedAccount?.accountId ?? requestedAccountId;
+          setUser(data.user);
+          setPermissions(data.permissions ?? {});
+          setAuthEngine(data.authEngine ?? "unknown");
+          setDataSource(data.dataSource ?? "unknown");
+          setPermissionError(null);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          const message = error instanceof Error ? error.message : "Unable to refresh permissions.";
+          console.error("[AuthContext] Permission refresh failed:", message);
+          setPermissionError(message);
+        } finally {
+          if (pendingRequest.current?.controller === controller) {
+            pendingRequest.current = null;
+            setIsLoading(false);
+          }
+        }
+      })();
+      pendingRequest.current = { accountId: requestedAccountId, controller, promise };
+      return promise;
     },
     []
   );
@@ -121,20 +168,9 @@ export function AuthProvider({
   // Initialize on mount
   // ------------------------------------------------------------------
   useEffect(() => {
-    const init = async () => {
-      setIsLoading(true);
-      if (initialSession) {
-        setSession(initialSession);
-        await fetchPermissions();
-      } else {
-        // No initial session — check if one exists via API
-        await fetchPermissions();
-      }
-      setIsLoading(false);
-    };
-
-    init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    void fetchPermissions();
+    return () => pendingRequest.current?.controller.abort();
+  }, [fetchPermissions]);
 
   // ------------------------------------------------------------------
   // Re-fetch permissions whenever the tab regains focus/visibility.
@@ -148,7 +184,7 @@ export function AuthProvider({
   useEffect(() => {
     const onFocus = () => {
       if (document.visibilityState === "visible") {
-        fetchPermissions();
+        void fetchPermissions();
       }
     };
 
@@ -171,9 +207,12 @@ export function AuthProvider({
   }, []);
 
   const logout = useCallback(async () => {
+    pendingRequest.current?.controller.abort();
+    selectedAccountId.current = undefined;
     setSession(null);
     setUser(null);
     setPermissions({});
+    setPermissionError(null);
     window.location.href = "/api/auth/logout";
   }, []);
 
@@ -203,13 +242,14 @@ export function AuthProvider({
       authEngine,
       dataSource,
       isLoading,
+      permissionError,
       isAuthenticated: !!user,
       login,
       logout,
       hasPermission,
       refreshPermissions,
     }),
-    [session, user, permissions, authEngine, dataSource, isLoading, login, logout, hasPermission, refreshPermissions]
+    [session, user, permissions, authEngine, dataSource, isLoading, permissionError, login, logout, hasPermission, refreshPermissions]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

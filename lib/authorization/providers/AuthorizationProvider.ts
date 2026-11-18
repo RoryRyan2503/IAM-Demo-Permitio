@@ -19,6 +19,15 @@
 
 import type { PermissionAction, PermissionResource, PermitContext, User, UserRole } from "@/types";
 
+export class AuthorizationUnavailableError extends Error {
+  readonly statusCode = 503;
+
+  constructor() {
+    super("Authorization service is temporarily unavailable. Please try again.");
+    this.name = "AuthorizationUnavailableError";
+  }
+}
+
 /**
  * Minimal "subject" shape passed to providers. Built from the app's full
  * `User` + request-scoped `PermitContext` — deliberately small so provider

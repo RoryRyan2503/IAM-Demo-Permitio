@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateRequest, authErrorResponse } from "@/lib/api/validateRequest";
 import { getAuthorizationProvider, getActiveProviderName } from "@/lib/authorization/providerFactory";
+import { isPdpConfigured } from "@/services/ping-authorize/client";
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
       provider: getActiveProviderName(),
       providerLabel: provider.getProviderName(),
       connected: status.connected,
+      demoMode: !isPdpConfigured(),
       message: status.message,
     });
   } catch (error) {

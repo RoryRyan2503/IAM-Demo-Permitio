@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useAccountContext } from "@/context/AccountContext";
 import { useAuth } from "@/context/AuthContext";
@@ -30,7 +30,8 @@ import { toast } from "sonner";
 interface CartProduct {
   id: string;
   name: string;
-  price: number;
+  price: number | null;
+  currency: string;
   sku: string;
   sales_org_id: string;
   category: string;
@@ -40,13 +41,16 @@ interface CartItem {
   id: string;
   product_id: string;
   quantity: number;
-  added_at: string;
   products: CartProduct | null;
 }
 
 interface CartMeta {
-  total: number;
+  total: number | null;
   itemCount: number;
+}
+
+function cartPrice(value: number | null, currency: string) {
+  return value === null ? "Price unavailable" : formatCurrency(value, currency);
 }
 
 export default function CartPage() {
@@ -58,40 +62,60 @@ export default function CartPage() {
 }
 
 function CartContent() {
-  const { selectedAccount } = useAccountContext();
+  const { selectedAccount, selectedCurrency } = useAccountContext();
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("create", "cart");
   useRouteGuard("view", "cart");
   const [items, setItems] = useState<CartItem[]>([]);
   const [meta, setMeta] = useState<CartMeta>({ total: 0, itemCount: 0 });
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [updatingQty, setUpdatingQty] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const requestVersion = useRef(0);
+  const scope = `${selectedAccount?.accountId}:${selectedCurrency}`;
+  const activeScope = useRef(scope);
+  activeScope.current = scope;
+  const busy = Boolean(removing || updatingQty || clearing);
 
   const fetchCart = useCallback(async () => {
-    if (!selectedAccount) return;
+    if (activeScope.current !== scope) return;
+    const version = requestVersion.current + 1;
+    requestVersion.current = version;
+    setItems([]);
+    setMeta({ total: 0, itemCount: 0 });
+    if (!selectedAccount) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/cart", {
-        headers: { "x-account-id": selectedAccount.accountId },
+        headers: { "x-account-id": selectedAccount.accountId, "x-selected-currency": selectedCurrency },
+        cache: "no-store",
       });
-      if (!res.ok) {
-        const data = await res.json();
-        setError(data.error ?? "Failed to load cart");
-        return;
-      }
       const data = await res.json();
+      if (requestVersion.current !== version || activeScope.current !== scope) return;
+      if (!res.ok) throw new Error(data.error ?? "Failed to load cart");
       setItems(data.data ?? []);
       setMeta(data.meta ?? { total: 0, itemCount: 0 });
-    } catch {
-      setError("Network error");
+    } catch (error) {
+      if (requestVersion.current === version && activeScope.current === scope) {
+        setError(error instanceof Error ? error.message : "Network error");
+      }
     } finally {
-      setIsLoading(false);
+      if (requestVersion.current === version && activeScope.current === scope) setIsLoading(false);
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, selectedCurrency, scope]);
 
   useEffect(() => {
-    fetchCart();
+    setRemoving(null);
+    setUpdatingQty(null);
+    setClearing(false);
+    void fetchCart();
+    return () => { requestVersion.current += 1; };
   }, [fetchCart]);
 
   /* Group items by sales org */
@@ -118,19 +142,21 @@ function CartContent() {
             headers: { "x-account-id": selectedAccount.accountId },
           }
         );
+        if (activeScope.current !== scope) return;
         if (res.ok) {
           toast.success("Removed from cart");
           await fetchCart();
         } else {
-          toast.error("Failed to remove item");
+          const data = await res.json();
+          toast.error(data.error ?? "Failed to remove item");
         }
       } catch {
         toast.error("Network error");
       } finally {
-        setRemoving(null);
+        if (activeScope.current === scope) setRemoving(null);
       }
     },
-    [selectedAccount, fetchCart]
+    [selectedAccount, fetchCart, scope]
   );
 
   const handleUpdateQty = useCallback(
@@ -143,53 +169,62 @@ function CartContent() {
           headers: {
             "Content-Type": "application/json",
             "x-account-id": selectedAccount.accountId,
+            "x-selected-currency": selectedCurrency,
           },
           body: JSON.stringify({ productId, quantity: newQty }),
         });
+        if (activeScope.current !== scope) return;
         if (res.ok) {
           await fetchCart();
         } else {
-          toast.error("Failed to update quantity");
+          const data = await res.json();
+          toast.error(data.error ?? "Failed to update quantity");
         }
       } catch {
         toast.error("Network error");
       } finally {
-        setUpdatingQty(null);
+        if (activeScope.current === scope) setUpdatingQty(null);
       }
     },
-    [selectedAccount, fetchCart]
+    [selectedAccount, selectedCurrency, fetchCart, scope]
   );
 
   const handleClearCart = useCallback(async () => {
-    if (!selectedAccount || items.length === 0) return;
-    for (const item of items) {
-      await fetch(
-        `/api/cart?productId=${encodeURIComponent(item.product_id)}`,
-        {
-          method: "DELETE",
-          headers: { "x-account-id": selectedAccount.accountId },
-        }
-      );
+    if (!selectedAccount) return;
+    setClearing(true);
+    try {
+      const res = await fetch("/api/cart?clear=true", {
+        method: "DELETE",
+        headers: { "x-account-id": selectedAccount.accountId },
+      });
+      if (activeScope.current !== scope) return;
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Failed to clear cart");
+      }
+      toast.success("Cart cleared");
+      await fetchCart();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Network error");
+    } finally {
+      if (activeScope.current === scope) setClearing(false);
     }
-    toast.success("Cart cleared");
-    await fetchCart();
-  }, [selectedAccount, items, fetchCart]);
+  }, [selectedAccount, fetchCart, scope]);
 
   /* Per-org subtotals */
   const orgSubtotals = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, number | null>();
     for (const [org, orgItems] of Array.from(grouped)) {
-      const subtotal = orgItems.reduce(
-        (sum: number, item: CartItem) => sum + (item.products?.price ?? 0) * item.quantity,
-        0
-      );
+      const subtotal = orgItems.reduce<number | null>((sum, item) =>
+        sum === null || item.products?.price == null ? null : sum + item.products.price * item.quantity, 0);
       map.set(org, subtotal);
     }
     return map;
   }, [grouped]);
 
   const estimatedTotal = useMemo(
-    () => Array.from(orgSubtotals.values()).reduce((a, b) => a + b, 0),
+    () => Array.from(orgSubtotals.values()).reduce<number | null>(
+      (a, b) => a === null || b === null ? null : a + b, 0),
     [orgSubtotals]
   );
 
@@ -220,7 +255,7 @@ function CartContent() {
               Cart
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              {items.length === 0
+              {error ? "Unable to load your cart" : items.length === 0
                 ? "Your cart is empty"
                 : `${meta.itemCount} item${meta.itemCount !== 1 ? "s" : ""} across ${grouped.size} sales org${grouped.size !== 1 ? "s" : ""}`}
             </p>
@@ -231,12 +266,13 @@ function CartContent() {
                 {selectedAccount.accountName}
               </Badge>
             )}
-            {items.length > 0 && (
+            {(items.length > 0 || error) && (
               <Button
                 variant="outline"
                 size="sm"
                 className="text-destructive hover:text-destructive text-xs"
                 onClick={handleClearCart}
+                disabled={busy || !canManage}
               >
                 <Trash2 className="h-3 w-3 mr-1" />
                 Clear all
@@ -246,7 +282,12 @@ function CartContent() {
         </div>
       </div>
 
-      {error && <AccessDenied compact message={error} />}
+      {error && (
+        <div role="alert" className="rounded-xl border border-destructive/30 p-4 space-y-3">
+          <p className="text-sm text-destructive">{error}</p>
+          <Button variant="outline" size="sm" onClick={() => void fetchCart()}>Retry</Button>
+        </div>
+      )}
 
       {/* ── Empty state ── */}
       {items.length === 0 && !error && (
@@ -273,7 +314,7 @@ function CartContent() {
           <div className="space-y-6">
             {Array.from(grouped.entries()).map(([org, orgItems]) => {
               const color = getCategoryColor(orgItems[0]?.products?.category ?? "");
-              const subtotal = orgSubtotals.get(org) ?? 0;
+              const subtotal = orgSubtotals.get(org) ?? null;
               return (
                 <div
                   key={org}
@@ -298,7 +339,7 @@ function CartContent() {
                       </span>
                     </div>
                     <span className="font-mono text-sm font-semibold">
-                      {formatCurrency(subtotal)}
+                      {cartPrice(subtotal, selectedCurrency)}
                     </span>
                   </div>
 
@@ -352,16 +393,17 @@ function CartContent() {
                               Unit
                             </p>
                             <p className="font-mono text-xs">
-                              {formatCurrency(p.price)}
+                              {cartPrice(p.price, p.currency)}
                             </p>
                           </div>
 
                           {/* Qty stepper */}
                           <div className="shrink-0 flex items-center border border-border rounded-lg">
                             <button
+                              aria-label={`Decrease quantity for ${p.sku}`}
                               className="p-1.5 hover:bg-secondary transition-colors rounded-l-lg disabled:opacity-50"
                               disabled={
-                                item.quantity <= 1 || isUpdating
+                                item.quantity <= 1 || busy || !canManage
                               }
                               onClick={() =>
                                 handleUpdateQty(
@@ -380,8 +422,9 @@ function CartContent() {
                               )}
                             </span>
                             <button
+                              aria-label={`Increase quantity for ${p.sku}`}
                               className="p-1.5 hover:bg-secondary transition-colors rounded-r-lg disabled:opacity-50"
-                              disabled={isUpdating}
+                              disabled={busy || !canManage || item.quantity >= 999}
                               onClick={() =>
                                 handleUpdateQty(
                                   item.product_id,
@@ -396,14 +439,15 @@ function CartContent() {
                           {/* Line subtotal */}
                           <div className="shrink-0 w-24 text-right">
                             <p className="font-mono text-sm font-semibold">
-                              {formatCurrency(p.price * item.quantity)}
+                              {cartPrice(p.price === null ? null : p.price * item.quantity, p.currency)}
                             </p>
                           </div>
 
                           {/* Remove */}
                           <button
+                            aria-label={`Remove ${p.sku} from cart`}
                             className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-                            disabled={isRemoving}
+                            disabled={busy || !canManage}
                             onClick={() => handleRemove(item.product_id)}
                           >
                             {isRemoving ? (
@@ -435,7 +479,7 @@ function CartContent() {
                     <span className="text-muted-foreground font-mono text-xs">
                       {org}
                     </span>
-                    <span className="font-mono">{formatCurrency(subtotal)}</span>
+                    <span className="font-mono">{cartPrice(subtotal, selectedCurrency)}</span>
                   </div>
                 ))}
               </div>
@@ -447,19 +491,19 @@ function CartContent() {
                 <div>
                   <p className="text-xs text-muted-foreground">Estimated total</p>
                   <p className="text-[10px] text-muted-foreground">
-                    Taxes & shipping calculated at checkout
+                    {estimatedTotal === null ? "Some prices are unavailable" : "Excludes taxes and shipping"}
                   </p>
                 </div>
                 <p className="font-mono text-xl font-semibold">
-                  {formatCurrency(estimatedTotal)}
+                  {cartPrice(estimatedTotal, selectedCurrency)}
                 </p>
               </div>
 
               <Separator />
 
-              <Button className="w-full" size="lg">
+              <Button className="w-full" size="lg" disabled>
                 <ShoppingCart className="h-4 w-4 mr-2" />
-                Proceed to checkout
+                Checkout unavailable in demo
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
 

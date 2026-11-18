@@ -40,7 +40,7 @@ export function PermissionGate({
   children,
   showLoading = false,
 }: PermissionGateProps) {
-  const { isLoading } = useAuth();
+  const { isLoading, permissionError } = useAuth();
   const hasPermission = usePermission(action, resource);
 
   if (isLoading && showLoading) {
@@ -49,7 +49,7 @@ export function PermissionGate({
     );
   }
 
-  if (isLoading) return null;
+  if (isLoading || (permissionError && !hasPermission)) return null;
 
   return hasPermission ? <>{children}</> : <>{fallback}</>;
 }

@@ -31,7 +31,7 @@ API route → canAccess(...)                     [unchanged signature, now a thi
               → AuthorizationService.checkAccess(...)   [NEW single entry point]
                   → Provider Factory (env var / runtime override)
                       → PermitProvider           → Permit SDK → toolBasedRebac() fallback
-                      → PingAuthorizeProvider     → PingAuthorize PDP → toolBasedRebac() fallback
+                      → PingAuthorizeProvider     → PingAuthorize PDP → HTTP 503 if unavailable
                   → decision cache (3s TTL)
                   → audit log (ring buffer, last 500 decisions)
 ```
@@ -77,14 +77,17 @@ risk/churn — see [Section 5](#5-key-design-decisions).
    a pure additive change to the ~15 existing routes — zero risk of breaking
    current behavior, and the new architecture is fully exercised the moment
    the wrapper delegates to it.
-2. **Fail-closed on unexpected errors, fail-open only to the documented
-   fallback.** Every provider catches unexpected exceptions and falls back to
-   `toolBasedRebac()` — the same tool-based RBAC the app already used when
-   Permit.io wasn't configured — rather than throwing or defaulting to allow.
+2. **A configured PingAuthorize PDP remains authoritative.** Transport failures,
+   malformed responses, and indeterminate decisions return HTTP 503 rather than
+   substituting local tool-based permissions. A real PDP denial remains a denial.
+   Decision requests allow 10 seconds per attempt and retry network failures
+   and HTTP 500/502/503/504 once; the permissions route has a 30-second execution
+   budget. Local demo policies are used only when `PING_PDP_URL` is unset.
 3. **Provider Factory + module-scoped provider singleton.** The stateless
    provider is replaced on Next.js dev-mode hot reloads so it cannot retain
    stale parser or HTTP request code. The demo store, decision cache, and audit
    log retain their `globalThis`-backed data across reloads.
+
 4. **PingAuthorize runs in local "demo mode" when unconfigured.** The real JSON
    PDP API request/response schema (Domain/Action/Service/IdentityProvider +
    flat `attributes` map, `decision`/`authorized`/`statements` response — see
@@ -105,6 +108,13 @@ risk/churn — see [Section 5](#5-key-design-decisions).
    consistency with the rest of the codebase, since introducing a different
    pattern for only the new admin routes would fragment the codebase's
    conventions rather than simplify it.
+
+Permission refreshes always carry the selected Sold-To account, including on
+focus/visibility changes. Same-account refreshes are deduplicated and superseded
+requests cannot overwrite newer account permissions. On temporary failures the
+UI retains the last verified map for that same account and displays a retry
+notice; changing accounts clears previous grants while fresh permissions load.
+Every protected API continues to enforce authorization independently.
 
 ## 6. How to switch providers
 

@@ -121,20 +121,26 @@ async function evaluateAccessRemote(request: DecisionRequest): Promise<DecisionR
     method: "POST",
     headers: { requestType: "pass-through" },
     body,
-    // Decisions are evaluated many times per page load — fail fast (no
-    // retries, short timeout) so an unreachable PDP falls back to the local
-    // demo evaluator quickly instead of stalling the request for 20-30s.
-    retries: 0,
-    timeoutMs: 3000,
+    // Allow cold-start latency and one transient-failure retry without changing policy engines.
+    retries: 1,
+    retryableStatuses: [500, 502, 503, 504],
+    timeoutMs: 10000,
   });
+
+  if (!res || !["PERMIT", "DENY", "INDETERMINATE", "NOT_APPLICABLE"].includes(res.decision)) {
+    throw new Error("PingAuthorize PDP returned an invalid decision response.");
+  }
+  if ((res.authorised !== undefined && typeof res.authorised !== "boolean")
+      || (res.authorized !== undefined && typeof res.authorized !== "boolean")) {
+    throw new Error("PingAuthorize PDP returned an invalid authorization flag.");
+  }
 
   // INDETERMINATE/NOT_APPLICABLE mean the PDP is reachable but no policy's
   // Target matched this request (commonly: policies edited in a branch but
   // never deployed/published to the environment the PDP evaluates, or a
   // Domain/Service/Action mismatch). Treat both as a distinct failure — NOT
-  // a real Deny — so the caller falls back to the role/tool-based ReBAC
-  // safety net instead of the persona-oriented local demo store (which
-  // models different scenarios and would mask this).
+  // a real Deny — so the caller reports authorization as unavailable
+  // rather than substituting a decision from unrelated local policies.
   if (res.decision === "INDETERMINATE" || res.decision === "NOT_APPLICABLE") {
     throw new Error(
       `PingAuthorize PDP returned ${res.decision} — no policy Target matched this request. Check that the policy/branch is deployed/published, and that Domain/Service/Action targets match exactly.`
@@ -240,10 +246,7 @@ function evaluateAccessLocal(request: DecisionRequest): DecisionResult {
 
 export async function evaluateAccess(request: DecisionRequest): Promise<DecisionResult> {
   if (isPdpConfigured()) {
-    // Let failures (including INDETERMINATE) propagate to the caller
-    // (PingAuthorizeProvider), which applies the role/tool-based ReBAC
-    // fallback — the demo persona store below models unrelated scenarios
-    // and would silently mask a misconfigured/undeployed real tenant.
+    // Let failures propagate: local demo policies must not replace a configured PDP.
     return evaluateAccessRemote(request);
   }
   return evaluateAccessLocal(request);

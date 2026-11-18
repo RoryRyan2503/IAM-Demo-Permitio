@@ -69,6 +69,27 @@ pinned via the `AUTH_PROVIDER` env var (`permit` | `ping`). See
 
 ---
 
+## Cart (no Supabase)
+
+The cart uses a signed, HTTP-only `iam_cart` cookie, not Supabase. It is scoped
+to the authenticated user and selected Sold-To account. Coveo supplies current
+product details and prices; PingAuthorize still enforces cart/product access
+and price visibility. Prices that are missing or restricted are not treated as zero.
+
+- Set `SESSION_SECRET` to a random secret of at least 32 characters on every
+  deployment (including Vercel). `MOCK_IDP_JWT_SECRET` is used if it is unset.
+  Keep the secret stable across instances/redeployments; rotating it resets carts.
+- Carts last seven days in the same browser. Only SKU, quantity, account and
+  ownership metadata are stored, never credentials or client-supplied prices.
+- This is a small demo cart: at most 20 product lines across accounts and a
+  3,500-character signed-cookie budget. Full carts return an explicit error.
+- Account switching isolates items. Logging in as another user cannot read
+  the previous user's cart; a new user's first mutation replaces that browser's cart.
+- This is not shared multi-device storage. Concurrent changes from different
+  tabs use last-write-wins semantics. Checkout/order submission is not implemented.
+
+Other legacy commerce endpoints are unchanged by this cart migration.
+
 ## Quick Start (Demo Mode — No External Services Required)
 
 The app runs fully in **demo mode** without Ping Identity, Permit.io, or Supabase.

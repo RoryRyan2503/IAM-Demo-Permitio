@@ -14,62 +14,44 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { validateRequest, authErrorResponse } from "@/lib/api/validateRequest";
-import { canAccess, getLastAuthEngine } from "@/lib/authorization/canAccess";
+import { checkAccessDetailed } from "@/lib/authorization/AuthorizationService";
 import { getLastDataSource } from "@/lib/crm/crmService";
-import { finalizeTrace } from "@/lib/debug/traceStore";
-import type { PermissionMap } from "@/types";
+import { finalizeTrace, type TraceEntry } from "@/lib/debug/traceStore";
+import type { PermissionAction, PermissionMap, PermissionResource } from "@/types";
+
+export const maxDuration = 30;
+
+const PERMISSION_CHECKS = [
+  ["view", "products"],
+  ["view_pricing", "products"],
+  ["view", "orders"],
+  ["create", "orders"],
+  ["view", "quotes"],
+  ["create", "quotes"],
+  ["view", "cart"],
+  ["create", "cart"],
+  ["view", "admin_dashboard"],
+  ["manage", "users"],
+] as const satisfies readonly (readonly [PermissionAction, PermissionResource])[];
 
 export async function GET(req: NextRequest) {
+  let requestTrace: TraceEntry | undefined;
   try {
     const { session, userContext, permitContext, trace } = await validateRequest(req);
+    requestTrace = trace;
     const { user } = userContext;
 
-    // Check all relevant permissions in parallel
-    const [
-      viewProducts,
-      viewPricing,
-      viewOrders,
-      createOrders,
-      viewQuotes,
-      createQuotes,
-      viewCart,
-      manageCart,
-      viewAdminDashboard,
-      manageUsers,
-    ] = await Promise.all([
-      canAccess(session.userId, "view",         "products",        permitContext, user.role),
-      canAccess(session.userId, "view_pricing",  "products",        permitContext, user.role),
-      canAccess(session.userId, "view",         "orders",          permitContext, user.role),
-      canAccess(session.userId, "create",       "orders",          permitContext, user.role),
-      canAccess(session.userId, "view",         "quotes",          permitContext, user.role),
-      canAccess(session.userId, "create",       "quotes",          permitContext, user.role),
-      canAccess(session.userId, "view",         "cart",            permitContext, user.role),
-      canAccess(session.userId, "create",       "cart",            permitContext, user.role),
-      canAccess(session.userId, "view",         "admin_dashboard", permitContext, user.role),
-      canAccess(session.userId, "manage",       "users",           permitContext, user.role),
-    ]);
+    const decisions = await Promise.all(PERMISSION_CHECKS.map(([action, resource]) =>
+      checkAccessDetailed(session.userId, action, resource, permitContext, user.role)
+    ));
 
-    const authEngine = getLastAuthEngine();
+    const engines = new Set(decisions.map((decision) => decision.engine));
+    const authEngine = engines.size === 1 ? decisions[0].engine : "mixed";
     trace.tags.push(`auth:${authEngine}`);
-    trace.upstreamCalls.push({
-      service: "PingAuthorize",
-      method: "POST",
-      url: "permit.check() ×10",
-      status: 200,
+    const permissions: PermissionMap = {};
+    PERMISSION_CHECKS.forEach(([action, resource], index) => {
+      permissions[`${action}:${resource}`] = decisions[index].allowed;
     });
-
-    const permissions: PermissionMap = {
-      "view:products": viewProducts,
-      "view_pricing:products": viewPricing,
-      "view:orders": viewOrders,
-      "create:orders": createOrders,
-      "view:quotes": viewQuotes,
-      "create:quotes": createQuotes,
-      "view:cart": viewCart,
-      "create:cart": manageCart,
-      "view:admin_dashboard": viewAdminDashboard,
-      "manage:users": manageUsers,
-    };
 
     trace.status = 200;
     trace.responseTime = Math.round(performance.now() - trace.timestamp);
@@ -95,9 +77,14 @@ export async function GET(req: NextRequest) {
       activeSalesArea: userContext.activeSalesArea,
       toolAccess: user.toolAccess,
       approvedToolIds: userContext.approvedToolIds,
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const { message, status } = authErrorResponse(error);
-    return NextResponse.json({ error: message }, { status });
+    if (requestTrace) {
+      requestTrace.status = status;
+      requestTrace.responseSummary = message;
+      finalizeTrace(requestTrace);
+    }
+    return NextResponse.json({ error: message }, { status, headers: { "Cache-Control": "no-store" } });
   }
 }

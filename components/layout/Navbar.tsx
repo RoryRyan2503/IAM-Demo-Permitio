@@ -9,7 +9,7 @@ import { ConnectionStatusBadge } from "@/components/layout/ConnectionStatusBadge
 import { SwitchUserModal } from "@/components/layout/SwitchUserModal";
 
 export function Navbar() {
-  const { user, logout, dataSource } = useAuth();
+  const { user, logout, dataSource, permissionError, refreshPermissions, isLoading: permissionsLoading } = useAuth();
   const { selectedAccount, availableAccounts, switchAccount, isLoading, userContext, error: accountError } =
     useAccountContext();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -29,6 +29,7 @@ export function Navbar() {
   }, [accountDropdownOpen]);
 
   return (
+    <>
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-white px-5 lg:px-7 gap-4">
       {/* ── Left: Sold-to selector ── */}
       <div className="flex items-center gap-3 min-w-0">
@@ -236,6 +237,20 @@ export function Navbar() {
       )}
       <SwitchUserModal open={switchUserOpen} onClose={() => setSwitchUserOpen(false)} />
     </header>
+    {permissionError && (
+      <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">
+        <span>{permissionError}</span>
+        <button
+          type="button"
+          disabled={permissionsLoading}
+          onClick={() => void refreshPermissions()}
+          className="font-semibold underline disabled:opacity-50"
+        >
+          Retry permissions
+        </button>
+      </div>
+    )}
+    </>
   );
 }
 

@@ -29,7 +29,7 @@
  */
 
 import type { PermissionAction, PermissionResource, PermitContext, UserRole } from "@/types";
-import { buildSubject, type AuthorizationDecisionDetail } from "./providers/AuthorizationProvider";
+import { AuthorizationUnavailableError, buildSubject, type AuthorizationDecisionDetail } from "./providers/AuthorizationProvider";
 import { getAuthorizationProvider, getProviderByName, type AuthProviderName } from "./providerFactory";
 import { buildCacheKey, getCached, setCached } from "./decisionCache";
 import { recordDecision } from "./auditLog";
@@ -130,6 +130,7 @@ export async function checkAccess(
   } catch (error) {
     console.error("[AuthorizationService] checkAccess failed:", error);
     _lastAuthEngine = "error";
+    if (error instanceof AuthorizationUnavailableError) throw error;
     return false; // fail closed
   }
 }

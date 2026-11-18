@@ -108,7 +108,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
           if (data.selectedAccount) {
             localStorage.setItem(STORAGE_KEY, data.selectedAccount.accountId);
           }
-          await refreshPermissions();
+          await refreshPermissions(data.selectedAccount?.accountId);
           return;
         }
 
@@ -127,7 +127,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Refresh permissions for the new account context
-        await refreshPermissions();
+        await refreshPermissions(data.selectedAccount?.accountId);
       } catch (fetchError) {
         setError(fetchError instanceof Error ? fetchError.message : "Unable to load your Sold-To accounts.");
       } finally {

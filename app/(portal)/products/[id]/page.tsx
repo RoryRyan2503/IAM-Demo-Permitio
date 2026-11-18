@@ -102,20 +102,22 @@ function ProductDetailContent() {
         headers: {
           "Content-Type": "application/json",
           "x-account-id": selectedAccount.accountId,
+          "x-selected-currency": selectedCurrency,
         },
         body: JSON.stringify({ productId: product.id, sku: product.sku, quantity }),
       });
       if (res.ok) {
         toast.success(`Added ${quantity}× to cart`, { description: product.name });
       } else {
-        toast.error("Failed to add to cart");
+        const data = await res.json();
+        toast.error(data.error ?? "Failed to add to cart");
       }
     } catch {
       toast.error("Network error");
     } finally {
       setAddingToCart(false);
     }
-  }, [selectedAccount, product, quantity]);
+  }, [selectedAccount, selectedCurrency, product, quantity]);
 
   if (isLoading) {
     return (

@@ -40,11 +40,11 @@ export interface PingRequestOptions {
   headers?: Record<string, string>;
   /** Number of retry attempts for transient failures. Default 2. */
   retries?: number;
+  /** Override retryable HTTP statuses for idempotent decision requests. */
+  retryableStatuses?: readonly number[];
   /**
-   * Per-attempt connect/response timeout in ms. Kept short (well under
-   * undici's 10s default connect timeout) so an unreachable PDP/PAP host
-   * falls back to the local demo evaluator quickly instead of hanging the
-   * request for 20-30s across retries. Default 5000.
+   * Per-attempt connect/response timeout in ms. Default 5000.
+   * Decision requests override this to allow remote PDP cold starts.
    */
   timeoutMs?: number;
   /**
@@ -133,6 +133,9 @@ export async function pingRequest<T>(
   options: PingRequestOptions = {}
 ): Promise<T> {
   const { method = "GET", body, headers = {}, retries = 2, timeoutMs = 5000, respondWith } = options;
+  const retryableStatuses = options.retryableStatuses
+    ? new Set(options.retryableStatuses)
+    : RETRYABLE_STATUS;
 
   const activeTrace = getCurrentTrace();
   const url = path ? `${baseUrl.replace(/\/$/, "")}${path}` : baseUrl;
@@ -198,7 +201,7 @@ export async function pingRequest<T>(
 
       if (!res.ok) {
         const errorBody = responseText ?? undefined;
-        if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
+        if (retryableStatuses.has(res.status) && attempt < retries) {
           console.warn(`[PingAuthorize] ${method} ${path} → ${res.status}, retrying (attempt ${attempt + 1})`);
           await delay(200 * 2 ** attempt);
           continue;

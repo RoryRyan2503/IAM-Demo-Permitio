@@ -11,8 +11,8 @@
  */
 
 import type { PermitContext } from "@/types";
-import { toolBasedRebac } from "../fallbackRebac";
 import { evaluateAccess, getPdpConnectivity, toTrustFrameworkRequest } from "@/services/ping-authorize/decisions";
+import { AuthorizationUnavailableError } from "./AuthorizationProvider";
 import type {
   AuthorizationDecisionDetail,
   AuthorizationProvider,
@@ -77,20 +77,9 @@ export class PingAuthorizeProvider implements AuthorizationProvider {
         latencyMs: Math.round(performance.now() - start),
       };
     } catch (error) {
-      // PDP unreachable, or reachable but INDETERMINATE (no policy Target
-      // matched — usually an undeployed/misconfigured branch) — fall back
-      // to shared tool-based ReBAC rather than failing open or throwing.
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[PingAuthorizeProvider] evaluateAccess failed (${message}). Falling back to local RBAC.`);
-      const allowed = toolBasedRebac(subject.role, action, resource, context, resourceAttributes);
-      return {
-        allowed,
-        engine: "pingauthorize-fallback",
-        request: requestPayload,
-        reason: "PingAuthorize PDP did not return a usable decision — evaluated via tool-based ReBAC",
-        error: message,
-        latencyMs: Math.round(performance.now() - start),
-      };
+      console.error(`[PingAuthorizeProvider] PDP decision unavailable (${message}). No local authorization substituted.`);
+      throw new AuthorizationUnavailableError();
     }
   }
 

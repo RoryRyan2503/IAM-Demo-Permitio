@@ -31,8 +31,22 @@ it("posts directly to the configured PDP URL with the pass-through header", asyn
       method: "POST",
       headers: { requestType: "pass-through" },
       body: toTrustFrameworkRequest(decisionRequest),
+      retries: 1,
+      retryableStatuses: [500, 502, 503, 504],
+      timeoutMs: 10000,
     })
   );
+});
+
+it.each([
+  null,
+  {},
+  { decision: "ERROR" },
+  { decision: "PERMIT", authorised: "false" },
+])("rejects malformed PDP responses rather than manufacturing a policy decision", async (response) => {
+  vi.mocked(pingRequest).mockResolvedValue(response);
+
+  await expect(evaluateAccess(decisionRequest)).rejects.toThrow("invalid");
 });
 
 it.each(["PERMIT", "DENY"] as const)("preserves a remote %s decision with an empty statements object", async (decision) => {

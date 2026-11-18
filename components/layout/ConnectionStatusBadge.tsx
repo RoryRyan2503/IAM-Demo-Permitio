@@ -5,7 +5,7 @@
  *
  * Polls /api/auth/provider-status and renders a colored dot + label:
  *   🟢 Ping Authz Connected   (PingAuthorize healthy)
- *   🟡 Local Authorization    (provider unreachable, fallback engine used)
+ *   🟡 Local Authorization    (no remote PDP configured)
  *   🔴 Provider Unavailable   (health check itself failed)
  */
 
@@ -28,9 +28,12 @@ export function ConnectionStatusBadge() {
       if (data.connected) {
         setStatus("connected");
         setLabel(data.provider === "ping" ? "Ping Authz Connected" : "Provider Connected");
-      } else {
+      } else if (data.demoMode) {
         setStatus("degraded");
         setLabel("Local Authorization");
+      } else {
+        setStatus("error");
+        setLabel("Provider Unavailable");
       }
     } catch {
       setStatus("error");
