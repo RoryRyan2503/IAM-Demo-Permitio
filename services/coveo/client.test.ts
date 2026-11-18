@@ -17,6 +17,8 @@ const options = {
 
 beforeEach(() => {
   vi.stubEnv("COVEO_VALIDATED_TOKEN", "");
+  vi.stubEnv("COVEO_ALLOW_STATIC_DEMO_TOKEN", "");
+  vi.stubEnv("DEMO_MODE", "");
 });
 
 afterEach(() => {
@@ -227,11 +229,51 @@ it("recovers after a transient gateway failure", async () => {
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
-it("disables static portal test tokens in production", async () => {
+it.each([
+  ["", ""],
+  ["true", ""],
+  ["", "true"],
+  ["false", "true"],
+  ["true", "false"],
+])("blocks production static tokens unless both demo settings are true (%s, %s)", async (demoMode, allowToken) => {
   vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("DEMO_MODE", demoMode);
+  vi.stubEnv("COVEO_ALLOW_STATIC_DEMO_TOKEN", allowToken);
   vi.stubEnv("COVEO_VALIDATED_TOKEN", "test-bruno-token");
   const fetchMock = vi.spyOn(globalThis, "fetch");
   await expect(searchCoveoProducts(options)).rejects.toMatchObject({ statusCode: 503 });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("allows a server-side portal token for an explicitly enabled hosted demo", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("DEMO_MODE", "true");
+  vi.stubEnv("COVEO_ALLOW_STATIC_DEMO_TOKEN", "true");
+  vi.stubEnv("COVEO_VALIDATED_TOKEN", "test-portal-token");
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ results: [] })));
+
+  await searchCoveoProducts(options);
+
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({
+    validated_token: "test-portal-token",
+    honId: "test-hon-id",
+    selectedSoldToNumber: "0002031186",
+  });
+});
+
+it("still rejects an expired portal token in hosted-demo mode", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("DEMO_MODE", "true");
+  vi.stubEnv("COVEO_ALLOW_STATIC_DEMO_TOKEN", "true");
+  const payload = Buffer.from(JSON.stringify({ exp: 1 })).toString("base64url");
+  vi.stubEnv("COVEO_VALIDATED_TOKEN", `e30.${payload}.test-signature`);
+  const fetchMock = vi.spyOn(globalThis, "fetch");
+
+  await expect(searchCoveoProducts(options)).rejects.toMatchObject({
+    statusCode: 403,
+    message: "The Coveo portal token has expired. Renew the portal session or the local test token.",
+  });
   expect(fetchMock).not.toHaveBeenCalled();
 });
 

@@ -319,6 +319,24 @@ PERMIT_PDP_URL=https://cloudpdp.api.permit.io
 
 ## Demo Mode Behavior
 
+### Hosted demo on Vercel
+
+Vercel runs production builds even for demo deployments. To use the server-side
+Coveo test token with mock login, configure these Vercel environment variables:
+
+```dotenv
+DEMO_MODE=true
+COVEO_ALLOW_STATIC_DEMO_TOKEN=true
+COVEO_VALIDATED_TOKEN=<valid portal test token>
+NEXT_PUBLIC_APP_URL=https://<your-vercel-domain>
+```
+
+Apply them to the intended Vercel environment (Production or Preview), then
+redeploy. Do not change `NODE_ENV` or expose the token with a `NEXT_PUBLIC_`
+prefix. The token must still be unexpired and authorized by the portal gateway
+for the requested user and Sold-To. Real production deployments should leave
+the opt-in disabled and use portal OIDC authentication.
+
 When running without real credentials, the app uses:
 
 | Layer | Demo behavior |

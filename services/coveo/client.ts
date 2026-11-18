@@ -88,8 +88,10 @@ function authHeaders(session: AuthSession, userContext: UserContext): Record<str
   const configuredToken = process.env.COVEO_VALIDATED_TOKEN?.trim();
   let token = session.accessToken;
   if (configuredToken) {
-    if (process.env.NODE_ENV === "production") {
-      throw new CoveoApiError("Static Coveo test tokens are disabled in production. Use portal OIDC authentication.", 503);
+    const hostedDemoEnabled = process.env.DEMO_MODE === "true"
+      && process.env.COVEO_ALLOW_STATIC_DEMO_TOKEN === "true";
+    if (process.env.NODE_ENV === "production" && !hostedDemoEnabled) {
+      throw new CoveoApiError("Static Coveo test tokens are disabled in production. For a hosted demo, explicitly enable DEMO_MODE and COVEO_ALLOW_STATIC_DEMO_TOKEN. Otherwise use portal OIDC authentication.", 503);
     }
     token = configuredToken;
   }
