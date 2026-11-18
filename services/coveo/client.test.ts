@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AuthSession, UserContext } from "@/types";
 import { searchCatalogProducts } from "@/services/catalog/productSearch";
-import { searchCoveoProducts } from "./client";
+import { fetchCoveoOrderDetails, searchCoveoProducts } from "./client";
 
 const options = {
   session: { accessToken: "demo-token-buyer" } as AuthSession,
@@ -17,7 +17,6 @@ const options = {
 
 beforeEach(() => {
   vi.stubEnv("COVEO_VALIDATED_TOKEN", "");
-  vi.stubEnv("COVEO_TOKEN_HON_ID", "");
 });
 
 afterEach(() => {
@@ -63,22 +62,20 @@ it("does not forward local demo tokens to the dev portal", async () => {
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
-it("uses a server-only portal token only for the matching Honeywell ID", async () => {
+it("uses the configured portal token with each signed-in user's Honeywell ID", async () => {
   vi.stubEnv("NODE_ENV", "development");
   vi.stubEnv("COVEO_VALIDATED_TOKEN", "test-bruno-token");
-  vi.stubEnv("COVEO_TOKEN_HON_ID", "test-hon-id");
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ results: [] })));
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ results: [] })));
   await searchCoveoProducts(options);
   expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ validated_token: "test-bruno-token", honId: "test-hon-id" });
-  vi.stubEnv("COVEO_TOKEN_HON_ID", "another-user");
-  await expect(searchCoveoProducts(options)).rejects.toMatchObject({ statusCode: 403 });
-  expect(fetchMock).toHaveBeenCalledOnce();
+  await searchCoveoProducts({ ...options, userContext: { ...options.userContext, user: { ...options.userContext.user, honId: "another-user" } } });
+  expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({ validated_token: "test-bruno-token", honId: "another-user" });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
 it("preserves upstream rejection status and a safe request ID without exposing response bodies", async () => {
   vi.stubEnv("NODE_ENV", "development");
   vi.stubEnv("COVEO_VALIDATED_TOKEN", "test-bruno-token");
-  vi.stubEnv("COVEO_TOKEN_HON_ID", "test-hon-id");
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("sensitive response content", {
     status: 403, headers: { "x-request-id": "request-123" },
   }));
@@ -88,16 +85,40 @@ it("preserves upstream rejection status and a safe request ID without exposing r
 });
 
 it("keeps a genuine upstream 502 distinct from token rejection", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("gateway failure", { status: 502 }));
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("gateway failure", { status: 502 }));
   await expect(searchCoveoProducts({ ...options, session: { accessToken: "test-portal-token" } as AuthSession }))
-    .rejects.toMatchObject({ statusCode: 502, message: expect.stringContaining("dev-portal gateway") });
+    .rejects.toMatchObject({ statusCode: 502, message: "The service is temporarily unavailable. Please try again shortly." });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("recovers after a transient gateway failure", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response("gateway failure", { status: 502 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ results: [{ uniqueId: "sensor-1", title: "Sensor" }] })));
+  const result = await searchCoveoProducts({ ...options, session: { accessToken: "test-portal-token" } as AuthSession });
+  expect(result.products[0].name).toBe("Sensor");
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
 it("disables static portal test tokens in production", async () => {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("COVEO_VALIDATED_TOKEN", "test-bruno-token");
-  vi.stubEnv("COVEO_TOKEN_HON_ID", "test-hon-id");
   const fetchMock = vi.spyOn(globalThis, "fetch");
   await expect(searchCoveoProducts(options)).rejects.toMatchObject({ statusCode: 503 });
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("uses the configured order-header URL and dynamic user/account context", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("COVEO_VALIDATED_TOKEN", "test-portal-token");
+  vi.stubEnv("COVEO_APP_ID", "test-app");
+  vi.stubEnv("COVEO_ORDER_HEADER_URL", "https://portal.example.test/order-header");
+  vi.stubEnv("COVEO_ORDER_LINEITEM_URL", "https://portal.example.test/order-lines");
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ data: [] })));
+  await fetchCoveoOrderDetails({ session: options.session, userContext: options.userContext, orderNumber: "0265009149" });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(String(fetchMock.mock.calls[0][0])).toBe("https://portal.example.test/order-header?appId=test-app");
+  expect(String(fetchMock.mock.calls[1][0])).toBe("https://portal.example.test/order-lines?appId=test-app");
+  expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ honId: "test-hon-id", validated_token: "test-portal-token" });
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ soldToNumber: "0002031186", orderNumber: "0265009149" });
 });

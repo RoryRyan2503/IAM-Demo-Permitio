@@ -64,15 +64,11 @@ function requireAccount(userContext: UserContext) {
 function authHeaders(session: AuthSession, userContext: UserContext): Record<string, string> {
   const honId = userContext.user.honId;
   if (!honId) throw new CoveoApiError("The signed-in user has no Honeywell ID.", 400);
-  const configuredToken = process.env.https://devapi.portal.honeywell.com/pingauthorize/rest/ping/search/v2?appId=a7wnc51036b9?.trim();
-  const configuredHonId = process.env.COVEO_TOKEN_HON_ID?.trim();
+  const configuredToken = process.env.COVEO_VALIDATED_TOKEN?.trim();
   let token = session.accessToken;
   if (configuredToken) {
     if (process.env.NODE_ENV === "production") {
       throw new CoveoApiError("Static Coveo test tokens are disabled in production. Use portal OIDC authentication.", 503);
-    }
-    if (!configuredHonId || configuredHonId !== honId) {
-      throw new CoveoApiError("The configured Coveo test token is not assigned to this Honeywell ID. Sign in as its matching user or use portal OIDC authentication.", 403);
     }
     token = configuredToken;
   }
@@ -85,7 +81,7 @@ function authHeaders(session: AuthSession, userContext: UserContext): Record<str
   }
   if (!configuredToken && (token.startsWith("demo-token-") ||
       (claims?.iss && claims.iss === (process.env.MOCK_IDP_ISSUER || "local-mock-idp")))) {
-    throw new CoveoApiError("Local mock login does not provide a dev-portal token. For local testing, configure COVEO_VALIDATED_TOKEN and its matching COVEO_TOKEN_HON_ID on the server, or sign in through portal OIDC.", 403);
+    throw new CoveoApiError("Local mock login does not provide a dev-portal token. For local testing, configure COVEO_VALIDATED_TOKEN on the server, or sign in through portal OIDC.", 403);
   }
   if (claims?.exp !== undefined && claims.exp <= Math.floor(Date.now() / 1000)) {
     throw new CoveoApiError("The Coveo portal token has expired. Renew the portal session or the local test token.", 403);
@@ -101,15 +97,19 @@ function authHeaders(session: AuthSession, userContext: UserContext): Record<str
 async function postJson(url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    const request = {
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      cache: "no-store",
-      signal: AbortSignal.timeout(15_000),
-    });
+      cache: "no-store" as const,
+    };
+    response = await fetch(url, { ...request, signal: AbortSignal.timeout(15_000) });
+    if ([502, 503, 504].includes(response.status)) {
+      await response.body?.cancel();
+      response = await fetch(url, { ...request, signal: AbortSignal.timeout(15_000) });
+    }
   } catch {
-    throw new CoveoApiError("Could not reach the Coveo/PingAuthorize service.", 502);
+    throw new CoveoApiError("The service is temporarily unavailable. Please try again shortly.", 502);
   }
 
   const responseText = await response.text();
@@ -125,10 +125,11 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
       .map((header) => response.headers.get(header))
       .find((value) => value && /^[A-Za-z0-9._:-]{1,128}$/.test(value));
     const reference = requestId ? ` Request ID: ${requestId}.` : "";
+    console.error("[Coveo] Upstream request failed", { status: response.status, requestId: requestId ?? null });
     const reason = response.status === 401 || response.status === 403
-      ? " Verify the portal token and its authorized Honeywell ID/Sold-To combination."
-      : " The dev-portal gateway could not complete this request; compare the same user, Sold-To and sales areas in Bruno.";
-    throw new CoveoApiError(`Coveo service returned HTTP ${response.status}.${reason}${reference}`,
+      ? "Access to this information was denied."
+      : "The service is temporarily unavailable. Please try again shortly.";
+    throw new CoveoApiError(`${reason}${reference}`,
       response.status === 401 || response.status === 403 ? 403 : 502);
   }
   return payload;
