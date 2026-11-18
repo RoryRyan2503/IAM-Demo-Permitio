@@ -27,7 +27,12 @@ export async function GET(req: NextRequest) {
   trace.userId = session.userId;
   trace.userRole = session.role;
 
-  const userContext = await getUserContext(session.userId, session.email);
+  const userContext = await getUserContext(
+    session.userId,
+    session.email,
+    undefined,
+    session.identitySource
+  );
   const accountIds = userContext.user.accounts.map((a) => a.accountId);
 
   if (accountIds.length === 0) {

@@ -32,6 +32,8 @@ import type { AuthSession, PermissionMap, UserRole, UserPersona } from "@/types"
 
 interface UserProfile {
   id: string;
+  honId: string;
+  contactId: string;
   name: string;
   email: string;
   role: UserRole;

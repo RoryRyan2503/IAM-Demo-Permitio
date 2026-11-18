@@ -27,12 +27,18 @@ export async function GET(
       session.userId, "view_pricing", "products", permitContext, user.role
     );
 
+    const selectedCurrency = req.headers.get("x-selected-currency") ?? "USD";
+    if (!/^[A-Za-z]{3}$/.test(selectedCurrency)) {
+      return NextResponse.json({ error: "Invalid selected currency" }, { status: 400 });
+    }
+
     const result = await searchCatalogProducts({
       session,
       userContext,
       query: params.id,
       userAgent: req.headers.get("user-agent") ?? "",
       referer: req.headers.get("referer") ?? "",
+      selectedCurrency: selectedCurrency.toUpperCase(),
     });
     const product = result.products.find(
       (item) => item.id === params.id || item.sku.toLowerCase() === params.id.toLowerCase()

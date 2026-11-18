@@ -84,7 +84,11 @@ export async function validateRequest(
 
   // Step 3: Verify the user actually has access to the requested account
   if (requestedAccountId) {
-    const hasAccess = await userHasAccountAccess(session.userId, requestedAccountId);
+    const hasAccess = await userHasAccountAccess(
+      session.userId,
+      requestedAccountId,
+      session.identitySource
+    );
     if (!hasAccess) {
       trace.status = 403;
       trace.tags.push("account-access-denied");
@@ -101,7 +105,8 @@ export async function validateRequest(
   const userContext = await getUserContext(
     session.userId,
     session.email,
-    requestedAccountId
+    requestedAccountId,
+    session.identitySource
   );
 
   trace.tags.push(`data:${getLastDataSource()}`);
@@ -114,6 +119,7 @@ export async function validateRequest(
 
   // Step 5: Build PermitContext — ready for canAccess() calls
   const permitContext: PermitContext = {
+    honId: userContext.user.honId,
     selectedAccountId: userContext.selectedAccount?.accountId,
     allowedSalesOrgs: userContext.selectedSalesOrgs,
     activeSalesArea: userContext.activeSalesArea ?? undefined,

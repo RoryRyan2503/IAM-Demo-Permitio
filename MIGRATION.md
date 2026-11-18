@@ -57,7 +57,7 @@ risk/churn — see [Section 5](#5-key-design-decisions).
 | `services/ping-authorize/client.ts` | Low-level REST client: Basic Auth, retry/backoff on 502/503/504 + network errors, `X-Respond-With` header support. |
 | `services/ping-authorize/demoStore.ts` | Seeded in-memory Policy Set/Policy store so the feature works with zero external PingAuthorize deployment. |
 | `services/ping-authorize/policySets.ts`, `policies.ts` | CRUD functions — call the real PAP when `PING_PAP_URL` is configured, otherwise operate on the demo store. |
-| `services/ping-authorize/decisions.ts` | Evaluates access — calls the real PDP (`POST {PING_PDP_URL}/governance-engine`) when configured, otherwise runs a local deny-overrides/default-deny evaluator over the demo policies. |
+| `services/ping-authorize/decisions.ts` | Evaluates access — calls the real PDP (`POST {PING_PDP_URL}`, used as-is) when configured, otherwise runs a local deny-overrides/default-deny evaluator over the demo policies. |
 | `app/api/admin/{auth-provider,policy-sets,policy-sets/[id],policies,policies/[id],test-access,audit-log}/route.ts` | Admin-only REST endpoints backing the new Admin Console tabs. |
 | `components/admin/{ProviderPanel,PolicySetsPanel,PoliciesPanel,PolicyEditor}.tsx` | Admin Console UI: provider switch/connectivity, Policy Set CRUD, Policy CRUD, visual policy editor with generated JSON preview. |
 | `app/(portal)/admin/test-access/page.tsx` | Decision Testing Console — runs one request against both providers and shows a side-by-side ALLOW/DENY comparison. |
@@ -81,10 +81,10 @@ risk/churn — see [Section 5](#5-key-design-decisions).
    fallback.** Every provider catches unexpected exceptions and falls back to
    `toolBasedRebac()` — the same tool-based RBAC the app already used when
    Permit.io wasn't configured — rather than throwing or defaulting to allow.
-3. **Provider Factory + singleton caching via `globalThis`**, matching the
-   existing pattern in `lib/debug/traceStore.ts`. This keeps provider
-   instances (and the demo store / decision cache / audit log) stable across
-   Next.js dev-mode hot reloads.
+3. **Provider Factory + module-scoped provider singleton.** The stateless
+   provider is replaced on Next.js dev-mode hot reloads so it cannot retain
+   stale parser or HTTP request code. The demo store, decision cache, and audit
+   log retain their `globalThis`-backed data across reloads.
 4. **PingAuthorize runs in local "demo mode" when unconfigured.** The real JSON
    PDP API request/response schema (Domain/Action/Service/IdentityProvider +
    flat `attributes` map, `decision`/`authorized`/`statements` response — see
@@ -148,7 +148,9 @@ follows.
 
 ### 9.1 The real wire format (not subject/resource/action/environment)
 
-PingAuthorize's JSON PDP API (`POST {PING_PDP_URL}/governance-engine`) does
+PDP requests include the HTTP header `requestType: pass-through`. Policy Manager requests are unchanged.
+
+PingAuthorize's JSON PDP API (`POST {PING_PDP_URL}`, with the complete endpoint configured) does
 **not** accept a nested ABAC object. It has exactly five top-level fields:
 
 ```json
@@ -191,9 +193,10 @@ The response looks like:
 }
 ```
 
-`authorized` (boolean) is what this app treats as the definitive decision;
+`authorised` (or `authorized`) is the definitive boolean decision when present;
 `decision` is the human-readable uppercase `"PERMIT"`/`"DENY"` equivalent.
-`statements[]` carries advice/obligations — this app does not act on them,
+`statements` may be an array or a keyed object (the connected tenant returns
+`{}` when there are no statements). It carries advice/obligations — this app does not act on them,
 only surfaces their `name`s in the Decision Testing Console's "reason" field.
 
 ### 9.2 Mapping design used by this app

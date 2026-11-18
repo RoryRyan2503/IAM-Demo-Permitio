@@ -1,17 +1,16 @@
 /**
  * POST /api/auth/idp-login
  *
- * "Enterprise Login" — authenticates against the local mock IDP
- * (username/password) and, on success, issues a signed JWT + session cookie.
+ * "Enterprise Login" — authenticates a DynamoDB user with the shared demo
+ * password and, on success, issues a signed JWT + session cookie.
  *
  * Flow:
  *   1. Validate request body (reject malformed input)
- *   2. Verify credentials against the mock IDP directory (identity only)
- *   3. Issue + self-verify a signed JWT (sub/username/email/given_name/
- *      family_name/iss/aud/iat/exp)
- *   4. Resolve the user's role from the entitlement store (CRM/Supabase) —
- *      mirrors the existing demo-login pattern; used only for coarse
- *      route-gating in middleware.ts, never for authorization decisions
+ *   2. Verify the shared demo password and load identity from DynamoDB
+ *   3. Issue + self-verify a signed JWT (sub/email/given_name/family_name/
+ *      iss/aud/iat/exp)
+ *   4. Resolve the user's role and account context from DynamoDB to build
+ *      the session; API operations are still evaluated by PingAuthorize.
  *   5. Store the session cookie (same shape/flow as demo login)
  */
 
@@ -32,44 +31,49 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { username, password } = (body ?? {}) as { username?: unknown; password?: unknown };
+  const { userId, password } = (body ?? {}) as { userId?: unknown; password?: unknown };
 
   if (
-    typeof username !== "string" ||
+    typeof userId !== "string" ||
     typeof password !== "string" ||
-    !username.trim() ||
+    !userId.trim() ||
     !password ||
-    username.length > MAX_INPUT_LENGTH ||
+    userId.length > MAX_INPUT_LENGTH ||
     password.length > MAX_INPUT_LENGTH
   ) {
-    return NextResponse.json({ error: "Username and password are required" }, { status: 400 });
+    return NextResponse.json({ error: "Select a user and enter the shared password" }, { status: 400 });
   }
 
-  const idpUser = verifyMockIdpCredentials(username, password);
-  if (!idpUser) {
-    // Generic message — avoid revealing whether the username exists
-    return NextResponse.json({ error: "Invalid username or password" }, { status: 401 });
+  try {
+    const idpUser = await verifyMockIdpCredentials(userId, password);
+    if (!idpUser) {
+      return NextResponse.json({ error: "Invalid user or password" }, { status: 401 });
+    }
+
+    const jwt = await issueMockIdpJwt(idpUser);
+    const claims = await verifyMockIdpJwt(jwt);
+    if (!claims || !claims.exp) {
+      console.error("[idp-login] Issued token failed self-verification");
+      return NextResponse.json({ error: "Authentication failed" }, { status: 500 });
+    }
+
+    const { user } = await getUserContext(idpUser.userId, idpUser.email, undefined, "dynamodb");
+    const session: AuthSession = {
+      userId: idpUser.userId,
+      email: idpUser.email,
+      name: `${idpUser.firstName} ${idpUser.lastName}`.trim(),
+      honId: idpUser.honId,
+      role: user.role,
+      accessToken: jwt,
+      expiresAt: claims.exp,
+      identitySource: "dynamodb",
+    };
+
+    await setSessionCookie(session);
+    return NextResponse.json({ ok: true, redirect: "/home" });
+  } catch (error) {
+    console.error("[idp-login] DynamoDB authentication failed:", error);
+    const status = (error as { statusCode?: number }).statusCode ?? 503;
+    return NextResponse.json({ error: "Unable to authenticate with the user directory." }, { status });
   }
-
-  const jwt = await issueMockIdpJwt(idpUser);
-  const claims = await verifyMockIdpJwt(jwt); // defensive self-check (signature/iss/aud)
-  if (!claims || !claims.exp) {
-    console.error("[idp-login] Issued token failed self-verification");
-    return NextResponse.json({ error: "Authentication failed" }, { status: 500 });
-  }
-
-  const { user } = await getUserContext(idpUser.userId, idpUser.email);
-
-  const session: AuthSession = {
-    userId: idpUser.userId,
-    email: idpUser.email,
-    name: `${idpUser.firstName} ${idpUser.lastName}`,
-    role: user.role,
-    accessToken: jwt,
-    expiresAt: claims.exp,
-  };
-
-  await setSessionCookie(session);
-
-  return NextResponse.json({ ok: true, redirect: "/home" });
 }

@@ -95,6 +95,7 @@ export function buildSubject(
     persona: context?.persona,
     isSuperUser: context?.isSuperUser,
     attributes: {
+      honId: context?.honId ?? "",
       allowedSalesOrgs: context?.allowedSalesOrgs ?? [],
       selectedAccountId: context?.selectedAccountId ?? null,
       activeSalesArea: context?.activeSalesArea ?? null,

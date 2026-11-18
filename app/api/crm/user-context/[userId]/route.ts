@@ -54,7 +54,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const userContext = await getUserContext(
     targetUserId,
     session.email,
-    selectedAccountId
+    selectedAccountId,
+    session.identitySource
   );
 
   trace.status = 200;

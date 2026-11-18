@@ -4,7 +4,7 @@
  * Legacy demo users (Miguel/Sarah/Carlos) : Supabase-first, mockData fallback
  *   JWT (identity) → Supabase CRM tables → Authorization Engine
  *
- * Local-mock-IDP users (the 50 imported DynamoDB users) : DynamoDB only,
+ * Enterprise mock-IDP users selected from DynamoDB : DynamoDB only,
  *   never duplicated into Supabase/mockData — see dynamoEntitlementService.ts
  *   JWT sub (userId) → DynamoDB → Authorization Engine
  *
@@ -26,7 +26,6 @@ import {
   CRM_USERS_BY_EMAIL,
   type CrmUser,
 } from "./mockData";
-import { isDynamoIdpUser } from "@/lib/auth/dynamoUsers";
 import { getUserContextFromDynamo, userHasAccountAccessDynamo } from "./dynamoEntitlementService";
 
 // ---------------------------------------------------------------------------
@@ -41,8 +40,8 @@ export function getLastDataSource(): DataSource {
   return _lastDataSource;
 }
 
-function usesDynamoEntitlements(userId: string): boolean {
-  return process.env.DYNAMODB_ENTITLEMENTS_ENABLED === "true" || isDynamoIdpUser(userId);
+function usesDynamoEntitlements(identitySource?: "dynamodb"): boolean {
+  return process.env.DYNAMODB_ENTITLEMENTS_ENABLED === "true" || identitySource === "dynamodb";
 }
 
 // ---------------------------------------------------------------------------
@@ -298,9 +297,10 @@ function buildContextFromMock(
 export async function getUserContext(
   userId: string,
   email?: string,
-  selectedAccountId?: string
+  selectedAccountId?: string,
+  identitySource?: "dynamodb"
 ): Promise<UserContext> {
-  if (usesDynamoEntitlements(userId)) {
+  if (usesDynamoEntitlements(identitySource)) {
     _lastDataSource = "dynamodb";
     return getUserContextFromDynamo(userId, selectedAccountId);
   }
@@ -325,9 +325,10 @@ export async function getUserContext(
 
 export async function userHasAccountAccess(
   userId: string,
-  accountId: string
+  accountId: string,
+  identitySource?: "dynamodb"
 ): Promise<boolean> {
-  if (usesDynamoEntitlements(userId)) {
+  if (usesDynamoEntitlements(identitySource)) {
     return userHasAccountAccessDynamo(userId, accountId);
   }
 

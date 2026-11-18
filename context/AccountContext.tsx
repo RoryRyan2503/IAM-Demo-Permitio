@@ -31,10 +31,13 @@ import type { UserContext, Account } from "@/types";
 interface AccountContextValue {
   userContext: UserContext | null;
   selectedAccount: Account | null;
+  selectedCurrency: string;
   availableAccounts: Account[];
   selectedSalesOrgs: string[];
   isLoading: boolean;
+  error: string | null;
   switchAccount: (accountId: string) => Promise<void>;
+  setSelectedCurrency: (currency: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +47,8 @@ interface AccountContextValue {
 const AccountContext = createContext<AccountContextValue | null>(null);
 
 const STORAGE_KEY = "iam_selected_account";
+const CURRENCY_STORAGE_KEY = "iam_selected_currency";
+const DEFAULT_CURRENCY = process.env.NEXT_PUBLIC_COVEO_DEFAULT_CURRENCY ?? "USD";
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -52,7 +57,25 @@ const STORAGE_KEY = "iam_selected_account";
 export function AccountProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, refreshPermissions } = useAuth();
   const [userContext, setUserContext] = useState<UserContext | null>(null);
+  const [selectedCurrency, setSelectedCurrencyState] = useState(DEFAULT_CURRENCY);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const savedCurrency = localStorage.getItem(CURRENCY_STORAGE_KEY);
+    if (savedCurrency && /^[A-Z]{3}$/.test(savedCurrency)) {
+      setSelectedCurrencyState(savedCurrency);
+    }
+  }, []);
+
+  const setSelectedCurrency = useCallback((currency: string) => {
+    const normalized = currency.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(normalized)) {
+      throw new Error("Currency must be a three-letter ISO code.");
+    }
+    setSelectedCurrencyState(normalized);
+    localStorage.setItem(CURRENCY_STORAGE_KEY, normalized);
+  }, []);
 
   // ------------------------------------------------------------------
   // Fetch user context from CRM API
@@ -62,6 +85,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       if (!user?.id) return;
 
       setIsLoading(true);
+      setError(null);
       try {
         const url = accountId
           ? `/api/crm/user-context/me?accountId=${accountId}`
@@ -74,7 +98,11 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         if (res.status === 403 && accountId) {
           localStorage.removeItem(STORAGE_KEY);
           const retryRes = await fetch("/api/crm/user-context/me");
-          if (!retryRes.ok) return;
+          if (!retryRes.ok) {
+            const retryData = await retryRes.json();
+            setError(retryData.error ?? "Unable to load your Sold-To accounts.");
+            return;
+          }
           const data: UserContext = await retryRes.json();
           setUserContext(data);
           if (data.selectedAccount) {
@@ -84,7 +112,11 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        if (!res.ok) return;
+        if (!res.ok) {
+          const data = await res.json();
+          setError(data.error ?? "Unable to load your Sold-To accounts.");
+          return;
+        }
 
         const data: UserContext = await res.json();
         setUserContext(data);
@@ -96,8 +128,8 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
 
         // Refresh permissions for the new account context
         await refreshPermissions();
-      } catch {
-        // Silent fail — demo mode works without API
+      } catch (fetchError) {
+        setError(fetchError instanceof Error ? fetchError.message : "Unable to load your Sold-To accounts.");
       } finally {
         setIsLoading(false);
       }
@@ -111,6 +143,7 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated || !user) {
       setUserContext(null);
+      setError(null);
       return;
     }
 
@@ -148,12 +181,15 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
     () => ({
       userContext,
       selectedAccount,
+      selectedCurrency,
       availableAccounts,
       selectedSalesOrgs,
       isLoading,
+      error,
       switchAccount,
+      setSelectedCurrency,
     }),
-    [userContext, selectedAccount, availableAccounts, selectedSalesOrgs, isLoading, switchAccount]
+    [userContext, selectedAccount, selectedCurrency, availableAccounts, selectedSalesOrgs, isLoading, error, switchAccount, setSelectedCurrency]
   );
 
   return (

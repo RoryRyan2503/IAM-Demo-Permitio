@@ -11,11 +11,12 @@
  *   - httpOnly: JS cannot access the cookie (XSS protection)
  *   - secure: cookie only sent over HTTPS (set to true in production)
  *   - sameSite: "lax" — protects against CSRF for most use cases
- *   - The JWT itself is verified on every authenticated API request
+ *   - DynamoDB mock-IDP JWTs are signature-checked on every server session read
  */
 
 import { cookies } from "next/headers";
 import { decodeJwt } from "jose";
+import { verifyMockIdpJwt } from "@/lib/auth/mockIdpJwt";
 import type { AuthSession, UserRole } from "@/types";
 
 export const SESSION_COOKIE = "iam_session";
@@ -104,8 +105,8 @@ export async function getStateFromCookie(): Promise<string | null> {
  * Retrieve and decode the session from the httpOnly cookie.
  * Returns null if the cookie is missing or malformed.
  *
- * NOTE: This does NOT verify the JWT signature — use verifySession() for
- * security-critical checks. This is fine for UI rendering decisions.
+ * The DynamoDB mock-IDP JWT is verified and bound to the session identity
+ * before the session is returned.
  */
 export async function getSession(): Promise<AuthSession | null> {
   try {
@@ -119,6 +120,13 @@ export async function getSession(): Promise<AuthSession | null> {
     // Reject obviously expired sessions
     if (session.expiresAt < Math.floor(Date.now() / 1000)) {
       return null;
+    }
+
+    if (session.identitySource === "dynamodb") {
+      const claims = await verifyMockIdpJwt(session.accessToken);
+      if (!claims || claims.sub !== session.userId || claims.email !== session.email) {
+        return null;
+      }
     }
 
     return session;

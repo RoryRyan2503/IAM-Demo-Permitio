@@ -1,111 +1,107 @@
 /**
- * Local Mock Identity Provider (IDP) — Authentication only
+ * DynamoDB-backed mock identity provider.
  *
- * Replaces the non-functional Ping Identity OIDC login for the "Enterprise
- * Login" (username/password) experience described in the IAM POC spec.
- *
- * IMPORTANT architectural boundary:
- *   - This module owns IDENTITY only: userId, username, password, firstName,
- *     lastName, email. It has NO knowledge of roles, tools, accounts, sales
- *     orgs, or any other authorization entitlement.
- *   - Entitlements continue to live exclusively in the CRM entitlement store
- *     (lib/crm/mockData.ts / Supabase `users` tables), keyed by the same
- *     `userId` — see lib/crm/crmService.ts.
- *   - PingAuthorize/Permit remain the only components that make authorization
- *     decisions; this file never returns a permit/deny.
- *
- * The 50 demo identities are the imported DynamoDB user extract
- * (lib/auth/dynamoUsers.ts, sourced from dynamouser.csv) — only their
- * identity fields (userId/email/firstName/lastName) are used here; the
- * same records' role/userType/sbg attributes are used separately by
- * lib/crm/mockData.ts to seed matching entitlement records.
- *
- * Passwords are demo-only. All 50 users share one demo password (documented
- * in .env.local.example / README) and are stored as a salted scrypt hash,
- * never in plaintext.
+ * This module authenticates identity only. Account and tool entitlements are
+ * resolved separately by the DynamoDB entitlement service, and authorization
+ * decisions remain with PingAuthorize.
  */
 
-import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
-import { DYNAMO_USERS } from "@/lib/auth/dynamoUsers";
+import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { getDynamoDocClient, getSeedTableName, isDynamoConfigured } from "@/lib/db/dynamoClient";
 
 export interface MockIdpUser {
   userId: string;
-  username: string;
   firstName: string;
   lastName: string;
   email: string;
+  honId: string;
+  contactId: string;
 }
 
-interface MockIdpCredential extends MockIdpUser {
-  passwordSalt: string;
-  passwordHash: string;
+interface DynamoUserRecord {
+  user_id?: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  honeywell_id?: string;
+  contact_id?: string;
 }
 
-/** Demo-only shared password for all 50 mock-IDP users (never a real credential). */
 const DEMO_PASSWORD = process.env.MOCK_IDP_DEMO_PASSWORD ?? "demo-only-change-me";
+const PASSWORD_SALT = randomBytes(16);
+const PASSWORD_HASH = scryptSync(DEMO_PASSWORD, PASSWORD_SALT, 64);
+const USER_TABLE_FIELDS = {
+  "#userId": "user_id",
+  "#firstName": "first_name",
+  "#lastName": "last_name",
+  "#email": "email",
+  "#honId": "honeywell_id",
+  "#contactId": "contact_id",
+};
 
-function hashPassword(password: string, salt: string): string {
-  return scryptSync(password, salt, 64).toString("hex");
+function mapUser(record: DynamoUserRecord): MockIdpUser | null {
+  if (!record.user_id) return null;
+  return {
+    userId: record.user_id,
+    firstName: record.first_name ?? "",
+    lastName: record.last_name ?? "",
+    email: record.email ?? "",
+    honId: record.honeywell_id ?? "",
+    contactId: record.contact_id ?? "",
+  };
 }
 
-function usernameFromName(firstName: string, lastName: string): string {
-  return `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z0-9.]/g, "");
+async function scanUsers(userId?: string): Promise<MockIdpUser[]> {
+  if (!isDynamoConfigured()) {
+    throw Object.assign(new Error("DynamoDB is not configured."), { statusCode: 503 });
+  }
+
+  const users: MockIdpUser[] = [];
+  let ExclusiveStartKey: Record<string, unknown> | undefined;
+
+  do {
+    const response = await getDynamoDocClient().send(
+      new ScanCommand({
+        TableName: getSeedTableName("users"),
+        ProjectionExpression: Object.keys(USER_TABLE_FIELDS).join(", "),
+        ExpressionAttributeNames: USER_TABLE_FIELDS,
+        ...(userId
+          ? {
+              FilterExpression: "#userId = :userId",
+              ExpressionAttributeValues: { ":userId": userId },
+            }
+          : {}),
+        ExclusiveStartKey,
+      })
+    );
+    for (const item of (response.Items ?? []) as DynamoUserRecord[]) {
+      const user = mapUser(item);
+      if (user) users.push(user);
+    }
+    ExclusiveStartKey = response.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+
+  return users;
 }
 
-function buildDirectory(): MockIdpCredential[] {
-  return DYNAMO_USERS.map((u) => {
-    const salt = randomBytes(16).toString("hex");
-    return {
-      userId: u.userId,
-      username: usernameFromName(u.firstName, u.lastName),
-      firstName: u.firstName,
-      lastName: u.lastName,
-      email: u.email,
-      passwordSalt: salt,
-      passwordHash: hashPassword(DEMO_PASSWORD, salt),
-    };
-  });
-}
-
-// Built once per server process — a real IDP would load this from a user
-// store; here it's derived in-memory from the identity fields of DYNAMO_USERS.
-const MOCK_IDP_DIRECTORY: MockIdpCredential[] = buildDirectory();
-
-const BY_USERNAME: Record<string, MockIdpCredential> = Object.fromEntries(
-  MOCK_IDP_DIRECTORY.map((u) => [u.username, u])
-);
-
-const BY_USER_ID: Record<string, MockIdpCredential> = Object.fromEntries(
-  MOCK_IDP_DIRECTORY.map((u) => [u.userId, u])
-);
-
-function toIdentity(u: MockIdpCredential): MockIdpUser {
-  return { userId: u.userId, username: u.username, firstName: u.firstName, lastName: u.lastName, email: u.email };
-}
-
-/** Full identity-only directory (no credentials) — used for admin/debug listing. */
-export function listMockIdpUsers(): MockIdpUser[] {
-  return MOCK_IDP_DIRECTORY.map(toIdentity);
-}
-
-export function getMockIdpUserById(userId: string): MockIdpUser | null {
-  const u = BY_USER_ID[userId];
-  return u ? toIdentity(u) : null;
+/** Returns the current identity directory directly from the DynamoDB users table. */
+export async function listMockIdpUsers(): Promise<MockIdpUser[]> {
+  return (await scanUsers()).sort((a, b) =>
+    `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`)
+  );
 }
 
 /**
- * Verify username/password against the mock IDP directory.
- * Returns the identity (never the password/hash) on success, or null.
+ * Validates the shared demo password and returns identity attributes from the
+ * current DynamoDB record. Passwords and password hashes are never persisted.
  */
-export function verifyMockIdpCredentials(username: string, password: string): MockIdpUser | null {
-  const normalized = username.trim().toLowerCase();
-  const record = BY_USERNAME[normalized];
-  if (!record) return null;
-
-  const candidateHash = hashPassword(password, record.passwordSalt);
-  const a = Buffer.from(candidateHash, "hex");
-  const b = Buffer.from(record.passwordHash, "hex");
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-
-  return toIdentity(record);
+export async function verifyMockIdpCredentials(
+  userId: string,
+  password: string
+): Promise<MockIdpUser | null> {
+  const [user] = await scanUsers(userId);
+  const candidateHash = scryptSync(password, PASSWORD_SALT, PASSWORD_HASH.length);
+  if (!user || !timingSafeEqual(candidateHash, PASSWORD_HASH)) return null;
+  return user;
 }

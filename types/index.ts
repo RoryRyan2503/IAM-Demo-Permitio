@@ -14,6 +14,8 @@ export interface AuthSession {
   role: UserRole;
   accessToken: string;
   expiresAt: number;
+  honId?: string;
+  identitySource?: "dynamodb";
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +158,7 @@ export type PermissionMap = Partial<
 >;
 
 export interface PermitContext {
+  honId?: string;
   selectedAccountId?: string;
   allowedSalesOrgs?: string[];
   activeSalesArea?: string;

@@ -4,7 +4,7 @@
  * After the local mock IDP authenticates a user (lib/auth/mockIdp.ts), this
  * module issues a signed, short-lived JWT carrying ONLY identity claims:
  *
- *   sub (userId), username, email, given_name, family_name, iss, aud, iat, exp
+ *   sub (user_id), email, given_name, family_name, iss, aud, iat, exp
  *
  * No roles/tools/accounts are ever embedded in the token — PingAuthorize
  * resolves those at decision time from the entitlement store (CRM/Supabase),
@@ -36,7 +36,6 @@ const TOKEN_TTL_SECONDS = 60 * 60; // 1 hour
 
 export interface MockIdpJwtClaims extends JWTPayload {
   sub: string;
-  username: string;
   email: string;
   given_name: string;
   family_name: string;
@@ -45,7 +44,6 @@ export interface MockIdpJwtClaims extends JWTPayload {
 export async function issueMockIdpJwt(user: MockIdpUser): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({
-    username: user.username,
     email: user.email,
     given_name: user.firstName,
     family_name: user.lastName,

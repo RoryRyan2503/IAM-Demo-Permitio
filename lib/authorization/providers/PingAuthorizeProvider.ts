@@ -2,7 +2,7 @@
  * PingAuthorizeProvider — PingAuthorize implementation of AuthorizationProvider
  * ============================================================================
  * Delegates to services/ping-authorize/decisions.ts, which either calls a
- * real PingAuthorize JSON PDP API (`POST {PING_PDP_URL}/governance-engine`)
+ * real PingAuthorize JSON PDP API (`POST {PING_PDP_URL}`)
  * when configured, or evaluates against the local demo policy store so the
  * app works without a live PingAuthorize tenant.
  *
@@ -12,7 +12,7 @@
 
 import type { PermitContext } from "@/types";
 import { toolBasedRebac } from "../fallbackRebac";
-import { evaluateAccess, getPdpConnectivity } from "@/services/ping-authorize/decisions";
+import { evaluateAccess, getPdpConnectivity, toTrustFrameworkRequest } from "@/services/ping-authorize/decisions";
 import type {
   AuthorizationDecisionDetail,
   AuthorizationProvider,
@@ -43,17 +43,17 @@ export class PingAuthorizeProvider implements AuthorizationProvider {
     resourceAttributes?: Record<string, unknown>
   ): Promise<AuthorizationDecisionDetail> {
     const start = performance.now();
-    const requestPayload = {
-      domain: "HonEcom",
-      service: resource.startsWith("admin_") || resource === "users" || resource === "policy_sets" || resource === "policies"
-        ? `Admin.${resource.replace(/(^.|_.)/g, (m) => m.replace("_", "").toUpperCase())}`
-        : `Commerce.${resource.replace(/(^.|_.)/g, (m) => m.replace("_", "").toUpperCase())}`,
-      identityProvider: "",
-      action,
-      attributes: {
+    const requestPayload = toTrustFrameworkRequest({
+      subject: {
+        id: subject.id,
         role: subject.role,
+        persona: subject.persona,
+        isSuperUser: subject.isSuperUser,
+        attributes: subject.attributes,
       },
-    };
+      resource: { type: resource, attributes: resourceAttributes ?? {} },
+      action,
+    });
 
     try {
       const result = await evaluateAccess({

@@ -211,9 +211,14 @@ The `admin | buyer | viewer` role from the JWT determines base permissions. Enfo
 The same `/api/products` endpoint returns **different products** for different users:
 - Ryan Buyer on ACC100 → sees IA001 + BA002 products
 - Ryan Buyer on ACC200 → sees PA001 products
-- Victor Viewer on ACC100 → sees same products but **price = 0** (masked)
+- Victor Viewer on ACC100 → sees same products but **price = null** (masked)
 
-This is enforced via `applyProductsFilter()` which builds a Supabase `.in('sales_org_id', [...])` WHERE clause server-side.
+The Coveo catalog request carries the authenticated HON ID, authorized Sold-To,
+currency, and sales-area context. Listing and detail pages use the returned SKU,
+product family, brand, category hierarchy, and thumbnails. SKU variants have
+distinct identities even when they share a family product ID. Positive catalog
+prices that round below one cent are shown as unavailable, not as free products;
+prices hidden by authorization remain `null`.
 
 ### 4. Multi-Account Commerce
 Buyers can switch between sold-to accounts (Honeywell US / Honeywell EU) via the **AccountSwitcher** in the navbar. Switching account:
@@ -303,7 +308,7 @@ PERMIT_PDP_URL=https://cloudpdp.api.permit.io
 | `PERMIT_PDP_URL` | No* | Permit.io PDP URL |
 | `AUTH_PROVIDER` | No | Active authorization provider: `permit` \| `ping` (default `permit`) |
 | `PING_PAP_URL` | No* | PingAuthorize Policy Administration Point base URL |
-| `PING_PDP_URL` | No* | PingAuthorize Policy Decision Point base URL |
+| `PING_PDP_URL` | No* | Complete PingAuthorize Policy Decision Point endpoint URL; used as-is without an appended path |
 | `PING_USERNAME` | No* | PingAuthorize Basic Auth username |
 | `PING_PASSWORD` | No* | PingAuthorize Basic Auth password |
 | `SESSION_SECRET` | Yes | 32+ char secret for session signing |

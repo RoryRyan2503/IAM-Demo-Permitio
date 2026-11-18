@@ -10,7 +10,7 @@ import { SwitchUserModal } from "@/components/layout/SwitchUserModal";
 
 export function Navbar() {
   const { user, logout, dataSource } = useAuth();
-  const { selectedAccount, availableAccounts, switchAccount, isLoading, userContext } =
+  const { selectedAccount, availableAccounts, switchAccount, isLoading, userContext, error: accountError } =
     useAccountContext();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [accountDropdownOpen, setAccountDropdownOpen] = useState(false);
@@ -127,6 +127,11 @@ export function Navbar() {
                                 <span className="text-[9px] text-gray-400 self-center">+{acc.salesOrgList.length - 4}</span>
                               )}
                             </div>
+                          )}
+                          {accountError && (
+                            <span className="max-w-[280px] truncate text-xs text-red-600" role="alert">
+                              {accountError}
+                            </span>
                           )}
                         </div>
                       </button>

@@ -7,6 +7,7 @@ export interface CatalogSearchOptions {
   query: string;
   userAgent: string;
   referer: string;
+  selectedCurrency?: string;
 }
 
 export interface CatalogSearchResult {

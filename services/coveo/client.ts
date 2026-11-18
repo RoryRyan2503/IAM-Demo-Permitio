@@ -40,10 +40,31 @@ function text(value: unknown, fallback = ""): string {
 }
 
 function cents(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value * 100);
-  if (typeof value !== "string") return null;
-  const parsed = Number(value.replace(/[^\d.-]/g, ""));
-  return Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
+  const numeric = typeof value === "string" ? value.replace(/[^\d.-]/g, "") : value;
+  if (typeof numeric !== "number" && (typeof numeric !== "string" || !/\d/.test(numeric))) return null;
+  const parsed = Number(numeric);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  const rounded = Math.round(parsed * 100);
+  // Do not display positive sub-cent catalog values as a free product.
+  return parsed > 0 && rounded === 0 ? null : rounded;
+}
+
+function textList(value: unknown): string[] {
+  return (Array.isArray(value) ? value : [value])
+    .map((item) => text(item).trim())
+    .filter(Boolean);
+}
+
+function imageUrl(value: unknown): string | null {
+  for (const candidate of textList(value)) {
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === "https:" || url.protocol === "http:") return url.toString();
+    } catch {
+      // Ignore non-URL image metadata; the UI has a missing-image placeholder.
+    }
+  }
+  return null;
 }
 
 function endpointUrl(configuredUrl: string | undefined, defaultUrl: string): string {
@@ -137,52 +158,98 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
 
 export interface CoveoProduct {
   id: string;
+  productId: string;
   name: string;
   description: string;
   price: number | null;
   sku: string;
   sales_org_id: string;
   category: string;
+  domain: string;
+  country: string;
   currency: string;
   image_url: string | null;
   created_at: string;
+  familyName: string;
+  familyDescription: string;
+  longDescription: string;
+  brand: string;
+  business: string;
+  categoryPath: string[];
+  availableCountries: string[];
+  unitOfMeasure: string;
   source?: "Coveo";
 }
 
-function normalizeProduct(value: unknown, fallbackSalesOrg: string, fallbackCurrency: string): CoveoProduct {
+function normalizeProduct(value: unknown, fallbackSalesOrg: string, fallbackCurrency: string): CoveoProduct | null {
   const item = record(value);
+  const title = record(item.title);
+  const row = record(title.row);
   const raw = record(item.raw);
-  const source = { ...item, ...raw };
+  const source = { ...item, ...raw, ...row };
   const priceInCents = firstValue(source, ["price_in_cents", "priceInCents"]);
   const price = priceInCents !== undefined ? Number(priceInCents) : cents(
-    firstValue(source, ["ec_price", "price", "unit_price", "unitPrice", "listPrice"])
+    firstValue(source, ["EC_price", "ec_price", "price", "unit_price", "unitPrice", "listPrice"])
   );
-  const image = firstValue(source, ["image_url", "imageUrl", "ec_image", "image", "ec_images"]);
-  const sku = text(firstValue(source, ["sku", "product_sku", "productCode", "ec_sku", "partNumber", "uniqueId"]));
+  const image = firstValue(source, [
+    "image_url", "imageUrl", "thumbnail", "ec_thumbnails", "EC_image", "ec_image", "image", "ec_images",
+    "ec_parent_product_primary_image_url", "ec_parent_product_thumbnail",
+  ]);
+  const sku = text(firstValue(source, ["ec_sku_id", "EC_SKU_ID", "sku_id", "sku", "product_sku", "productCode", "ec_sku", "partNumber"]));
+  const productId = text(firstValue(source, [
+    "ec_product_id", "EC_product_id", "EC_PRODUCT_ID", "product_id", "productId", "ec_item_group_id", "permanentid", "id", "uniqueId",
+  ]));
+  const name = text(firstValue(source, [
+    "name", "product_name", "productName", "ec_name", "EC_parent_product_description",
+  ]), text(item.title));
+  const description = text(firstValue(source, [
+    "ec_sku_description", "ec_shortdesc", "sku_description",
+    "EC_product_short_description", "EC_PRODUCT_SHORT_DESCRIPTION", "EC_parent_product_short_description",
+    "EC_short_description", "EC_SHORT_DESCRIPTION", "short_description",
+    "shortDescription", "description", "product_description", "ec_description", "excerpt",
+  ]));
+  // A product family can contain multiple orderable SKUs.
+  const id = sku || productId;
+  const categoryPaths = textList(firstValue(source, ["ec_product_category", "product_category"]));
+  const categoryPath = (categoryPaths.sort((a, b) => b.split("|").length - a.split("|").length)[0] ?? "")
+    .split("|").filter(Boolean);
+
+  if (!id) return null;
 
   return {
-    id: text(firstValue(source, ["id", "product_id", "productId", "uniqueId", "ec_item_group_id"]), sku),
-    name: text(firstValue(source, ["name", "product_name", "productName", "ec_name", "title"]), "Product"),
-    description: text(firstValue(source, ["description", "product_description", "ec_description", "excerpt"])),
+    id,
+    name: name || sku || "Product",
+    description,
     price: price !== null && Number.isFinite(price) ? price : null,
     sku,
-    sales_org_id: text(firstValue(source, ["sales_org_id", "salesOrg", "sales_org", "salesOrganization"]), fallbackSalesOrg),
-    category: text(firstValue(source, ["category", "categories", "ec_category"]), "Products"),
+    sales_org_id: text(firstValue(source, ["sales_org_id", "salesOrg", "sales_org", "salesOrganization", "EC_sales_org"]), fallbackSalesOrg),
+    category: text(firstValue(source, ["EC_category", "category", "categories", "leaf_category", "category_name", "ec_category"])),
     currency: text(firstValue(source, ["currency", "currencyCode"]), fallbackCurrency),
-    image_url: text(image) || null,
+    image_url: imageUrl(image),
     created_at: text(firstValue(source, ["created_at", "createdAt", "date"])),
+    productId,
+    domain: text(firstValue(source, ["ec_domain", "EC_domain", "EC_DOMAIN", "domain", "Domain"])),
+    country: text(firstValue(source, ["ec_country", "EC_country", "EC_COUNTRY", "country", "Country"])),
+    familyName: text(firstValue(source, ["ec_parent_product_name", "ec_parent_product_title"])),
+    familyDescription: text(source.ec_parent_product_description),
+    longDescription: text(source.ec_parent_product_long_description),
+    brand: text(firstValue(source, ["ec_brand", "brand"])),
+    business: text(source.business),
+    categoryPath,
+    availableCountries: textList(firstValue(source, ["ec_availability_country", "availability_country", "ec_parent_product_availability_country"])),
+    unitOfMeasure: text(source.ec_unit_of_measure),
   };
 }
 
 function searchResults(payload: unknown): { items: unknown[]; total: number } {
   const root = record(payload);
   const data = record(root.data);
-  const results = firstValue(root, ["results", "items"]) ?? firstValue(data, ["results", "items"]);
-  const items = Array.isArray(results)
-    ? results
-    : Array.isArray(root.data)
-      ? root.data
-      : [];
+  const results = root.results ?? root.items ?? data.results ?? data.items
+    ?? (Array.isArray(root.data) ? root.data : undefined);
+  if (!Array.isArray(results)) {
+    throw new CoveoApiError("Coveo returned an unexpected product response.", 502);
+  }
+  const items = results;
   const totalValue = firstValue(root, ["totalCount", "total", "total_count"])
     ?? firstValue(data, ["totalCount", "total", "total_count"]);
   const total = Number(totalValue);
@@ -195,6 +262,7 @@ export async function searchCoveoProducts(options: {
   query: string;
   userAgent: string;
   referer: string;
+  selectedCurrency?: string;
 }): Promise<{ products: CoveoProduct[]; total: number }> {
   const account = requireAccount(options.userContext);
   const allowedOrgs = new Set(options.userContext.selectedSalesOrgs);
@@ -204,12 +272,18 @@ export async function searchCoveoProducts(options: {
   }
 
   const activeArea = areas.find((area) => area.salesArea === options.userContext.activeSalesArea) ?? areas[0];
+  const currency = options.selectedCurrency?.trim().toUpperCase()
+    || process.env.NEXT_PUBLIC_COVEO_DEFAULT_CURRENCY?.trim().toUpperCase()
+    || "USD";
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new CoveoApiError("The selected currency is invalid.", 400);
+  }
   const salesCombination = `.*(${areas
     .map((area) => `${area.salesOrg}_${area.distributionChannel}_${area.division}`)
     .join("|")}): active-.*`;
   const headers = authHeaders(options.session, options.userContext);
   headers.selectedSoldToNumber = account.accountNumber;
-  headers.selectedCurrency = activeArea.currency;
+  headers.selectedCurrency = currency;
 
   const url = endpointUrl(process.env.COVEO_SEARCH_URL, DEFAULT_SEARCH_URL);
   const payload = await postJson(url, headers, {
@@ -234,7 +308,7 @@ export async function searchCoveoProducts(options: {
     },
     language: "en",
     country: "us",
-    currency: activeArea.currency,
+    currency,
     page: 0,
     perPage: 30,
     facets: [],
@@ -244,8 +318,11 @@ export async function searchCoveoProducts(options: {
   });
 
   const result = searchResults(payload);
+  const products = result.items
+    .map((item) => normalizeProduct(item, activeArea.salesOrg, currency))
+    .filter((product): product is CoveoProduct => product !== null);
   return {
-    products: result.items.map((item) => normalizeProduct(item, activeArea.salesOrg, activeArea.currency)),
+    products,
     total: result.total,
   };
 }

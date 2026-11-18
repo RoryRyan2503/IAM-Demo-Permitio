@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import { ProductImage } from "@/components/products/ProductImage";
+import type { CoveoProduct as ApiProduct } from "@/services/coveo/client";
 import {
   Search,
   X,
@@ -29,26 +31,12 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react";
-import { cn, formatCurrency, getCategoryColor, getProductType, getSalesOrgStyle } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import { toast } from "sonner";
 
 /* ------------------------------------------------------------------ */
 /* Product shape normalized by the Coveo API route                     */
 /* ------------------------------------------------------------------ */
-interface ApiProduct {
-  id: string;
-  name: string;
-  description: string;
-  price: number | null;
-  sku: string;
-  sales_org_id: string;
-  category: string;
-  currency: string;
-  image_url: string | null;
-  created_at: string;
-  source?: string;
-}
-
 export default function ProductsPage() {
   return (
     <PermissionGate action="view" resource="products" fallback={<AccessDenied />}>
@@ -58,7 +46,7 @@ export default function ProductsPage() {
 }
 
 function ProductsContent() {
-  const { selectedAccount } = useAccountContext();
+  const { selectedAccount, selectedCurrency } = useAccountContext();
   const { hasPermission } = useAuth();
   const [products, setProducts] = useState<ApiProduct[]>([]);
   const [productsTotal, setProductsTotal] = useState(0);
@@ -70,11 +58,14 @@ function ProductsContent() {
   const [addingToCart, setAddingToCart] = useState<string | null>(null);
 
   /* View & search state */
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [sortOrder, setSortOrder] = useState("relevance");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedOrgs, setSelectedOrgs] = useState<Set<string>>(new Set());
+  const [selectedDomains, setSelectedDomains] = useState<Set<string>>(new Set());
+  const [selectedCountries, setSelectedCountries] = useState<Set<string>>(new Set());
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const canAddToCart = hasPermission("create", "cart");
@@ -85,17 +76,28 @@ function ProductsContent() {
   const selectedAccountId = selectedAccount?.accountId;
 
   useEffect(() => {
-    if (!selectedAccountId) return;
+    if (!selectedAccountId) {
+      setProducts([]);
+      setProductsTotal(0);
+      setError(null);
+      setDataSources([]);
+      setSourceWarnings([]);
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
     const controller = new AbortController();
     const timeout = setTimeout(async () => {
-      setIsLoading(true);
-      setError(null);
       try {
         const params = new URLSearchParams();
         if (searchQuery.trim()) params.set("q", searchQuery.trim());
         const queryString = params.toString();
         const res = await fetch(`/api/products${queryString ? `?${queryString}` : ""}`, {
-          headers: { "x-account-id": selectedAccountId },
+          headers: {
+            "x-account-id": selectedAccountId,
+            "x-selected-currency": selectedCurrency,
+          },
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -121,21 +123,29 @@ function ProductsContent() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [selectedAccountId, searchQuery]);
+  }, [selectedAccountId, selectedCurrency, searchQuery]);
 
   /* ---------------------------------------------------------------- */
   /* Derived filter options                                            */
   /* ---------------------------------------------------------------- */
   const categories = useMemo(
-    () => Array.from(new Set(products.map((p) => p.category))).sort(),
+    () => Array.from(new Set(products.map((p) => p.category).filter(Boolean))).sort(),
     [products]
   );
-  const types = useMemo(
-    () => Array.from(new Set(products.map((p) => getProductType(p.category)))).sort(),
+  const brands = useMemo(
+    () => Array.from(new Set(products.map((p) => p.brand).filter(Boolean))).sort(),
     [products]
   );
   const orgs = useMemo(
     () => Array.from(new Set(products.map((p) => p.sales_org_id))).sort(),
+    [products]
+  );
+  const domains = useMemo(
+    () => Array.from(new Set(products.map((p) => p.domain).filter((value): value is string => Boolean(value)))).sort(),
+    [products]
+  );
+  const countries = useMemo(
+    () => Array.from(new Set(products.map((p) => p.country).filter((value): value is string => Boolean(value)))).sort(),
     [products]
   );
 
@@ -144,32 +154,39 @@ function ProductsContent() {
   /* ---------------------------------------------------------------- */
   const filtered = useMemo(() => {
     let result = products;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.sku.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          p.description?.toLowerCase().includes(q)
-      );
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      result = result.filter((product) => [
+        product.name, product.sku, product.productId, product.category,
+        product.description, product.domain, product.country, product.brand, product.familyName,
+      ].some((value) => value.toLowerCase().includes(query)));
     }
     if (selectedCategories.size > 0)
       result = result.filter((p) => selectedCategories.has(p.category));
-    if (selectedTypes.size > 0)
-      result = result.filter((p) => selectedTypes.has(getProductType(p.category)));
+    if (selectedBrands.size > 0)
+      result = result.filter((p) => selectedBrands.has(p.brand));
     if (selectedOrgs.size > 0)
       result = result.filter((p) => selectedOrgs.has(p.sales_org_id));
+    if (selectedDomains.size > 0)
+      result = result.filter((p) => p.domain && selectedDomains.has(p.domain));
+    if (selectedCountries.size > 0)
+      result = result.filter((p) => p.country && selectedCountries.has(p.country));
+    result = [...result];
+    if (sortOrder === "name") result.sort((a, b) => a.name.localeCompare(b.name));
+    if (sortOrder === "sku") result.sort((a, b) => a.sku.localeCompare(b.sku));
     return result;
-  }, [products, searchQuery, selectedCategories, selectedTypes, selectedOrgs]);
+  }, [products, searchQuery, selectedCategories, selectedBrands, selectedOrgs, selectedDomains, selectedCountries, sortOrder]);
 
   const activeFilterCount =
-    selectedCategories.size + selectedTypes.size + selectedOrgs.size;
+    selectedCategories.size + selectedBrands.size + selectedOrgs.size +
+    selectedDomains.size + selectedCountries.size;
 
   const clearAllFilters = () => {
     setSelectedCategories(new Set());
-    setSelectedTypes(new Set());
+    setSelectedBrands(new Set());
     setSelectedOrgs(new Set());
+    setSelectedDomains(new Set());
+    setSelectedCountries(new Set());
     setSearchQuery("");
   };
 
@@ -247,25 +264,24 @@ function ProductsContent() {
 
       <Separator />
 
-      {/* Type */}
-      <div>
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-          Type
-        </h4>
-        <div className="space-y-2">
-          {types.map((t) => (
-            <label key={t} className="flex items-center gap-2 cursor-pointer text-sm">
-              <Checkbox
-                checked={selectedTypes.has(t)}
-                onCheckedChange={() =>
-                  toggleFilter(selectedTypes, setSelectedTypes, t)
-                }
-              />
-              <span>{t}</span>
-            </label>
-          ))}
+      {brands.length > 0 && (
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Brand
+          </h4>
+          <div className="space-y-2">
+            {brands.map((brand) => (
+              <label key={brand} className="flex items-center gap-2 cursor-pointer text-sm">
+                <Checkbox
+                  checked={selectedBrands.has(brand)}
+                  onCheckedChange={() => toggleFilter(selectedBrands, setSelectedBrands, brand)}
+                />
+                <span>{brand}</span>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <Separator />
 
@@ -291,6 +307,50 @@ function ProductsContent() {
           ))}
         </div>
       </div>
+
+      {domains.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              Domain
+            </h4>
+            <div className="space-y-2">
+              {domains.map((domain) => (
+                <label key={domain} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <Checkbox
+                    checked={selectedDomains.has(domain)}
+                    onCheckedChange={() => toggleFilter(selectedDomains, setSelectedDomains, domain)}
+                  />
+                  <span>{domain}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {countries.length > 0 && (
+        <>
+          <Separator />
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+              Country
+            </h4>
+            <div className="space-y-2">
+              {countries.map((country) => (
+                <label key={country} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <Checkbox
+                    checked={selectedCountries.has(country)}
+                    onCheckedChange={() => toggleFilter(selectedCountries, setSelectedCountries, country)}
+                  />
+                  <span>{country}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 
@@ -301,16 +361,16 @@ function ProductsContent() {
     <div className="space-y-6">
       {/* ── Page header ── */}
       <div className="pb-4 border-b border-border">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
               Products
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Browse the product catalog for your authorized sales organizations
+              Browse products available for your selected Sold-To account
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             {dataSources.map((source) => (
               <Badge key={source} variant="outline" className="text-[10px]">{source}</Badge>
             ))}
@@ -319,6 +379,9 @@ function ProductsContent() {
                 {selectedAccount.accountName}
               </Badge>
             )}
+            <Badge variant="outline" className="font-mono text-[11px]">
+              {selectedCurrency}
+            </Badge>
             {!pricingVisible && (
               <Badge
                 variant="outline"
@@ -331,25 +394,31 @@ function ProductsContent() {
         </div>
       </div>
 
-      {error && <AccessDenied compact message={error} />}
+      {error && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+          {error}
+        </div>
+      )}
       {sourceWarnings.length > 0 && (
         <p className="text-xs text-amber-700" role="status">{sourceWarnings.join(" ")}</p>
       )}
 
       {/* ── Toolbar ── */}
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Search */}
-          <div className="relative flex-1 max-w-md">
+          <div className="relative min-w-[200px] flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search products..."
+              aria-label="Search products"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9 pr-8"
             />
             {searchQuery && (
               <button
+                aria-label="Clear product search"
                 onClick={() => setSearchQuery("")}
                 className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-5 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -377,6 +446,8 @@ function ProductsContent() {
           {/* View toggle */}
           <div className="flex items-center rounded-lg border border-border p-0.5">
             <button
+              aria-label="Grid view"
+              aria-pressed={viewMode === "grid"}
               onClick={() => setViewMode("grid")}
               className={cn(
                 "p-1.5 rounded-md transition-colors",
@@ -388,6 +459,8 @@ function ProductsContent() {
               <LayoutGrid className="h-4 w-4" />
             </button>
             <button
+              aria-label="List view"
+              aria-pressed={viewMode === "list"}
               onClick={() => setViewMode("list")}
               className={cn(
                 "p-1.5 rounded-md transition-colors",
@@ -399,6 +472,16 @@ function ProductsContent() {
               <List className="h-4 w-4" />
             </button>
           </div>
+          <select
+            aria-label="Sort products"
+            value={sortOrder}
+            onChange={(event) => setSortOrder(event.target.value)}
+            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+          >
+            <option value="relevance">Relevance</option>
+            <option value="name">Name</option>
+            <option value="sku">SKU</option>
+          </select>
         </div>
 
         {/* Active filter chips */}
@@ -417,11 +500,11 @@ function ProductsContent() {
                 </button>
               </Badge>
             ))}
-            {Array.from(selectedTypes).map((t) => (
+            {Array.from(selectedBrands).map((t) => (
               <Badge key={t} variant="secondary" className="gap-1 pr-1">
                 {t}
                 <button
-                  onClick={() => toggleFilter(selectedTypes, setSelectedTypes, t)}
+                  onClick={() => toggleFilter(selectedBrands, setSelectedBrands, t)}
                   className="ml-0.5 rounded-full hover:bg-foreground/10 p-0.5"
                 >
                   <X className="h-3 w-3" />
@@ -435,6 +518,22 @@ function ProductsContent() {
                   onClick={() => toggleFilter(selectedOrgs, setSelectedOrgs, org)}
                   className="ml-0.5 rounded-full hover:bg-foreground/10 p-0.5"
                 >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+            {Array.from(selectedDomains).map((domain) => (
+              <Badge key={domain} variant="secondary" className="gap-1 pr-1">
+                {domain}
+                <button onClick={() => toggleFilter(selectedDomains, setSelectedDomains, domain)} className="ml-0.5 rounded-full hover:bg-foreground/10 p-0.5">
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+            {Array.from(selectedCountries).map((country) => (
+              <Badge key={country} variant="secondary" className="gap-1 pr-1">
+                {country}
+                <button onClick={() => toggleFilter(selectedCountries, setSelectedCountries, country)} className="ml-0.5 rounded-full hover:bg-foreground/10 p-0.5">
                   <X className="h-3 w-3" />
                 </button>
               </Badge>
@@ -542,7 +641,8 @@ function ProductsContent() {
 
           {!isLoading && filtered.length > 0 && (
             <p className="text-xs text-muted-foreground mt-4">
-              Showing {filtered.length} of {productsTotal} products
+              Showing {filtered.length} of {products.length} loaded products
+              {productsTotal > products.length && ` (${productsTotal.toLocaleString()} search matches)`}
             </p>
           )}
         </div>
@@ -569,47 +669,30 @@ function ProductCardGrid({
   addingToCart,
   onAddToCart,
 }: ProductCardProps) {
-  const orgStyle = getSalesOrgStyle(product.sales_org_id);
-  const color = orgStyle.hex;
-  const type = getProductType(product.category);
   const isAdding = addingToCart === product.id;
 
   return (
     <div className="group rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-lg transition-all flex flex-col">
-      {/* Icon area */}
-      <div
-        className="relative h-40 rounded-t-xl flex items-center justify-center"
-        style={{
-          background: `linear-gradient(145deg, color-mix(in oklab, ${color} 12%, transparent), color-mix(in oklab, ${color} 4%, transparent))`,
-        }}
-      >
-        <Package
-          className="h-16 w-16 transition-transform group-hover:scale-105"
-          style={{ color }}
-        />
-        <Badge
-          className="absolute top-3 right-3 font-mono text-[10px] text-white border-0"
-          style={{ backgroundColor: color }}
-        >
-          {product.sales_org_id}
-        </Badge>
-        <Badge variant="secondary" className="absolute top-3 left-3 text-[10px]">
-          {type}
-        </Badge>
-      </div>
+      <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`} className="p-4 pb-0">
+        <ProductImage src={product.image_url} name={product.name} className="h-48 w-full" />
+      </Link>
 
       {/* Content */}
       <div className="p-5 flex flex-col gap-3 flex-1">
         <div>
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-mono text-[10px] text-muted-foreground">{product.sku}</p>
-            {product.source && <Badge variant="outline" className="text-[9px]">{product.source}</Badge>}
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            {product.brand && <Badge variant="secondary" className="text-[10px]">{product.brand}</Badge>}
+            {product.category && <span className="text-[11px] text-muted-foreground">{product.category}</span>}
           </div>
           <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`}>
-            <h3 className="text-sm font-semibold mt-0.5 group-hover:text-primary transition-colors line-clamp-2">
+            <h3 className="text-base font-semibold break-words group-hover:text-primary transition-colors line-clamp-2">
               {product.name}
             </h3>
           </Link>
+          {product.sku && product.sku !== product.name && <p className="mt-1 break-all font-mono text-xs text-muted-foreground">SKU {product.sku}</p>}
+          {product.familyName && product.familyName !== product.name && (
+            <p className="text-xs font-medium mt-1 line-clamp-2">{product.familyName}</p>
+          )}
           {product.description && (
             <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2">
               {product.description}
@@ -617,15 +700,15 @@ function ProductCardGrid({
           )}
         </div>
 
-        <div className="border-t border-border/50 mt-auto pt-3 flex items-end justify-between">
-          <span className="font-mono text-lg font-semibold">
+        <div className="border-t border-border/50 mt-auto pt-3">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">List price · {product.currency}</p>
+          <span className={cn("font-semibold", pricingVisible && product.price !== null ? "font-mono text-lg" : "text-sm text-muted-foreground")}>
             {pricingVisible ? (
               product.price !== null ? formatCurrency(product.price, product.currency) : "Price unavailable"
             ) : (
               <span className="text-sm text-muted-foreground">Price hidden</span>
             )}
           </span>
-          <span className="text-[11px] text-muted-foreground">{product.category}</span>
         </div>
 
         <div className="flex gap-2">
@@ -669,78 +752,64 @@ function ProductCardList({
   addingToCart,
   onAddToCart,
 }: ProductCardProps) {
-  const orgStyle = getSalesOrgStyle(product.sales_org_id);
-  const color = orgStyle.hex;
-  const type = getProductType(product.category);
   const isAdding = addingToCart === product.id;
 
   return (
-    <div className="group flex items-center gap-4 rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-lg transition-all p-4">
-      {/* Icon */}
-      <div
-        className="shrink-0 h-16 w-16 rounded-lg flex items-center justify-center"
-        style={{
-          background: `linear-gradient(145deg, color-mix(in oklab, ${color} 12%, transparent), color-mix(in oklab, ${color} 4%, transparent))`,
-        }}
-      >
-        <Package className="h-8 w-8" style={{ color }} />
-      </div>
+    <div className="group grid grid-cols-[80px_minmax(0,1fr)] gap-4 rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-lg transition-all p-4 lg:grid-cols-[104px_minmax(0,1fr)_160px]">
+      <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`} className="self-start">
+        <ProductImage src={product.image_url} name={product.name} className="h-20 w-20 lg:h-24 lg:w-[104px]" />
+      </Link>
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {product.sku}
-          </span>
-          {product.source && <Badge variant="outline" className="text-[9px]">{product.source}</Badge>}
-          <Badge variant="secondary" className="text-[10px]">
-            {type}
-          </Badge>
+        <div className="flex flex-wrap items-center gap-2 mb-1.5">
+          {product.brand && <Badge variant="secondary" className="text-[10px]">{product.brand}</Badge>}
+          {product.category && <span className="text-[11px] text-muted-foreground">{product.category}</span>}
         </div>
         <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`}>
-          <h3 className="text-sm font-semibold group-hover:text-primary transition-colors line-clamp-1">
+          <h3 className="text-base font-semibold break-words group-hover:text-primary transition-colors">
             {product.name}
           </h3>
         </Link>
-        <p className="text-xs text-muted-foreground line-clamp-1">
+        {product.sku && product.sku !== product.name && <p className="mt-1 break-all font-mono text-xs text-muted-foreground">SKU {product.sku}</p>}
+        {product.familyName && product.familyName !== product.name && (
+          <p className="text-xs font-medium mt-1">{product.familyName}</p>
+        )}
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground line-clamp-2">
           {product.description}
         </p>
       </div>
 
-      {/* Price */}
-      <div className="shrink-0 text-right hidden sm:block">
-        <p className="text-[10px] text-muted-foreground uppercase">List price</p>
-        <p className="font-mono font-semibold">
-          {pricingVisible && product.price !== null
-            ? formatCurrency(product.price, product.currency)
-            : "—"}
-        </p>
+      <div className="col-span-2 flex items-center justify-between gap-3 border-t border-border/50 pt-3 lg:col-span-1 lg:flex-col lg:items-end lg:justify-center lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <div className="lg:text-right">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">List price · {product.currency}</p>
+          <p className={cn("font-semibold", pricingVisible && product.price !== null ? "font-mono" : "text-xs text-muted-foreground")}>
+            {pricingVisible && product.price !== null
+              ? formatCurrency(product.price, product.currency)
+              : pricingVisible ? "Price unavailable" : "Price hidden"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {canAddToCart && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 text-xs"
+              disabled={isAdding}
+              onClick={() => onAddToCart(product)}
+            >
+              {isAdding ? <Loader2 className="h-3 w-3 animate-spin" /> : "Add"}
+            </Button>
+          )}
+
+          <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`} className="shrink-0">
+            <Button variant="ghost" size="sm" className="text-xs">
+              Details <ArrowRight className="ml-1 h-3 w-3" />
+            </Button>
+          </Link>
+        </div>
       </div>
-
-      {/* Org badge */}
-      <Badge
-        className="shrink-0 font-mono text-[10px] hidden md:flex text-white border-0"
-        style={{ backgroundColor: color }}
-      >
-        {product.sales_org_id}
-      </Badge>
-
-      {/* Add + arrow */}
-      {canAddToCart && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0 text-xs"
-          disabled={isAdding}
-          onClick={() => onAddToCart(product)}
-        >
-          {isAdding ? <Loader2 className="h-3 w-3 animate-spin" /> : "Add"}
-        </Button>
-      )}
-
-      <Link href={`/products/${encodeURIComponent(product.sku || product.id)}`} className="shrink-0">
-        <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
-      </Link>
     </div>
   );
 }

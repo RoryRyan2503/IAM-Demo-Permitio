@@ -7,7 +7,7 @@
  *
  * - Policy Decision Point (PDP): evaluates authorization requests in real
  *   time against published policies and returns a decision via the
- *   "JSON PDP API": `POST {baseUrl}/governance-engine` for a single decision
+ *   "JSON PDP API": `POST {PING_PDP_URL}` for a single decision
  *   (this app only uses the single-request form; the API also supports a
  *   `{ "requests": [...] }` batch form returning `{ "responses": [...] }`,
  *   in the same order as the requests).
@@ -26,7 +26,7 @@
  *                        structure on the wire.
  * - The response contains `decision` ("PERMIT" | "DENY", uppercase),
  *   `authorized` (boolean — the definitive allow/deny to enforce),
- *   `statements[]` (advice/obligations the calling Policy Enforcement Point
+ *   `statements` (array or keyed object of advice/obligations the calling Policy Enforcement Point
  *   — this app — is responsible for applying; not implemented here), and a
  *   `status` block (`code`/`messages`/`errors`).
  *
@@ -70,15 +70,16 @@ const ADMIN_RESOURCE_TYPES = new Set(["admin_dashboard", "users", "policy_sets",
  *     "identityProvider": "",
  *     "action": "view",
  *     "attributes": {
- *       "role": "admin"
+ *       "userId": "user-123",
+ *       "role": "admin",
+ *       "selectedAccountId": "sold-to-123"
  *     }
  *   }
  *
  * `domain` is always the constant "HonEcom". `service` is namespaced per
  * page (`Commerce.Products`, `Commerce.Cart`, `Commerce.Orders`, ... or
- * `Admin.*` for admin-console resources). `attributes` intentionally carries
- * only `role` — no other subject/resource attributes are sent for the
- * current PingAuthorize integration.
+ * `Admin.*` for admin-console resources). Subject identity, role, and relevant
+ * account/entitlement attributes are flattened into Trust Framework attributes.
  */
 export function toTrustFrameworkRequest(request: DecisionRequest): PdpRequest {
   const { subject, resource, action } = request;
@@ -86,23 +87,39 @@ export function toTrustFrameworkRequest(request: DecisionRequest): PdpRequest {
   const service = ADMIN_RESOURCE_TYPES.has(resource.type)
     ? `Admin.${toPascalCase(resource.type)}`
     : `Commerce.${toPascalCase(resource.type)}`;
+  const attributes: Record<string, string> = {
+    userId: subject.id,
+    role: subject.role,
+  };
+  for (const key of ["honId", "selectedAccountId", "activeSalesArea"] as const) {
+    const value = subject.attributes[key];
+    if (typeof value === "string" && value) attributes[key] = value;
+  }
+  for (const key of ["allowedSalesOrgs", "toolIds"] as const) {
+    const value = subject.attributes[key];
+    if (Array.isArray(value) && value.length > 0) {
+      attributes[key] = value.filter((item): item is string => typeof item === "string").join(",");
+    }
+  }
+  if (typeof subject.isSuperUser === "boolean") {
+    attributes.isSuperUser = String(subject.isSuperUser);
+  }
 
   return {
     domain: "HonEcom",
     service,
     identityProvider: "",
     action,
-    attributes: {
-      role: subject.role,
-    },
+    attributes,
   };
 }
 
 async function evaluateAccessRemote(request: DecisionRequest): Promise<DecisionResult> {
   const body = toTrustFrameworkRequest(request);
 
-  const res = await pingRequest<PdpResponse>(getPdpBaseUrl(), "/governance-engine", {
+  const res = await pingRequest<PdpResponse>(getPdpBaseUrl(), "", {
     method: "POST",
+    headers: { requestType: "pass-through" },
     body,
     // Decisions are evaluated many times per page load — fail fast (no
     // retries, short timeout) so an unreachable PDP falls back to the local
@@ -124,11 +141,14 @@ async function evaluateAccessRemote(request: DecisionRequest): Promise<DecisionR
     );
   }
 
-  const advice = res.statements?.map((s) => s.name).filter(Boolean).join("; ");
+  const statements = Array.isArray(res.statements)
+    ? res.statements
+    : Object.values(res.statements ?? {});
+  const advice = statements.map((s) => s.name).filter(Boolean).join("; ");
   // Real API returns `authorised` (British spelling) — `authorized` kept as a fallback.
-  const authorised = res.authorised ?? res.authorized ?? false;
+  const authorised = res.authorised ?? res.authorized ?? (res.decision === "PERMIT");
   return {
-    effect: authorised || res.decision === "PERMIT" ? "Permit" : "Deny",
+    effect: authorised ? "Permit" : "Deny",
     engine: "pingauthorize",
     reason: advice || undefined,
     request: body,

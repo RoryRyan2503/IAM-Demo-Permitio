@@ -51,19 +51,39 @@ function LoginContent() {
   const error = searchParams.get("error");
   const reason = searchParams.get("reason");
   const [loading, setLoading] = useState<string | null>(null);
-  const [username, setUsername] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [userSearch, setUserSearch] = useState("");
   const [password, setPassword] = useState("");
   const [enterpriseError, setEnterpriseError] = useState<string | null>(null);
-  const [mockUsers, setMockUsers] = useState<{ username: string; name: string }[]>([]);
+  const [mockUsers, setMockUsers] = useState<
+    { userId: string; name: string; email: string; honId: string }[]
+  >([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const normalizedUserSearch = userSearch.trim().toLocaleLowerCase();
+  const filteredUsers = normalizedUserSearch
+    ? mockUsers.filter((user) =>
+        user.name.toLocaleLowerCase().includes(normalizedUserSearch) ||
+        user.honId.toLocaleLowerCase().includes(normalizedUserSearch)
+      )
+    : mockUsers;
 
   useEffect(() => {
-    fetch("/api/auth/mock-idp-users")
-      .then((r) => r.json())
-      .then((data) => {
-        setMockUsers(data.users ?? []);
-        if (data.demoPassword) setPassword(data.demoPassword);
-      })
-      .catch(() => {});
+    const loadUsers = async () => {
+      try {
+        const response = await fetch("/api/auth/mock-idp-users");
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Unable to load users.");
+        const users = data.users ?? [];
+        setMockUsers(users);
+        setSelectedUserId(users[0]?.userId ?? "");
+      } catch (loadError) {
+        setUsersError(loadError instanceof Error ? loadError.message : "Unable to load users.");
+      } finally {
+        setUsersLoading(false);
+      }
+    };
+    void loadUsers();
   }, []);
 
   const handleDemoLogin = (persona: string) => {
@@ -79,7 +99,7 @@ function LoginContent() {
       const res = await fetch("/api/auth/idp-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ userId: selectedUserId, password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -185,9 +205,15 @@ function LoginContent() {
                 Enterprise Login
               </span>
               <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-mono text-white/35">
-                50 users
+                DynamoDB
               </span>
             </div>
+
+            {usersError && (
+              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400" role="alert">
+                {usersError}
+              </div>
+            )}
 
             {enterpriseError && (
               <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
@@ -197,26 +223,46 @@ function LoginContent() {
 
             <form onSubmit={handleEnterpriseLogin} className="space-y-2.5">
               <input
-                type="text"
-                list="mock-idp-users"
-                autoComplete="username"
-                placeholder="Type or select a user (e.g. christopher.roy)"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                disabled={!!loading}
+                type="search"
+                autoComplete="off"
+                aria-label="Search users by name or HON ID"
+                placeholder="Search by name or HON ID"
+                value={userSearch}
+                onChange={(e) => {
+                  setUserSearch(e.target.value);
+                  setSelectedUserId("");
+                }}
+                disabled={!!loading || usersLoading || mockUsers.length === 0}
                 className="w-full rounded-lg border border-white/15 bg-white/5 px-3.5 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-[#C8102E]/50 disabled:opacity-50"
               />
-              <datalist id="mock-idp-users">
-                {mockUsers.map((u) => (
-                  <option key={u.username} value={u.username}>
-                    {u.name}
+              <select
+                autoComplete="username"
+                value={selectedUserId}
+                onChange={(e) => setSelectedUserId(e.target.value)}
+                disabled={!!loading || usersLoading || filteredUsers.length === 0}
+                className="w-full rounded-lg border border-white/15 bg-white/5 px-3.5 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:border-[#C8102E]/50 disabled:opacity-50"
+              >
+                {usersLoading && <option value="">Loading users from DynamoDB…</option>}
+                {!usersLoading && mockUsers.length === 0 && <option value="">No users available</option>}
+                {!usersLoading && mockUsers.length > 0 && filteredUsers.length === 0 && (
+                  <option value="">No users match that name or HON ID</option>
+                )}
+                {!usersLoading && filteredUsers.length > 0 && !selectedUserId && (
+                  <option value="">Select a user</option>
+                )}
+                {filteredUsers.map((user) => (
+                  <option key={user.userId} value={user.userId} className="text-black">
+                    {[user.name, user.email, user.honId && `HON ID ${user.honId}`].filter(Boolean).join(" · ")}
                   </option>
                 ))}
-              </datalist>
+              </select>
+              <p className="text-[11px] text-white/35" aria-live="polite">
+                {filteredUsers.length} of {mockUsers.length} users
+              </p>
               <input
                 type="password"
                 autoComplete="current-password"
-                placeholder="Password"
+                placeholder="Shared demo password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={!!loading}
@@ -224,7 +270,7 @@ function LoginContent() {
               />
               <button
                 type="submit"
-                disabled={!!loading || !username || !password}
+                disabled={!!loading || usersLoading || !selectedUserId || !password}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#C8102E] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#b00e29] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading === "enterprise" ? <Spinner /> : null}
@@ -285,7 +331,7 @@ function LoginContent() {
           </div>
 
           <p className="mt-6 text-center text-[11px] text-white/20">
-            Enterprise Login uses the local mock IDP · Demo Login needs no credentials
+            Enterprise Login reads users from DynamoDB · Demo Login needs no credentials
           </p>
         </div>
       </div>

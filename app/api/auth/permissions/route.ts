@@ -82,6 +82,8 @@ export async function GET(req: NextRequest) {
       dataSource: getLastDataSource(),
       user: {
         id: user.id,
+        honId: user.honId,
+        contactId: user.contactId,
         name: user.name,
         email: user.email,
         role: user.role,

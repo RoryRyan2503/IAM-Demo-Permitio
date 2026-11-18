@@ -217,7 +217,7 @@ export interface DecisionResult {
 // ---------------------------------------------------------------------------
 
 /**
- * A single JSON PDP API decision request sent directly to /governance-engine.
+ * A single JSON PDP API decision request sent directly to PING_PDP_URL.
  * This matches the real PingAuthorize wire shape used by the connected tenant.
  */
 export interface PdpRequest {
@@ -228,7 +228,7 @@ export interface PdpRequest {
   /** e.g. "Commerce.Products", "Commerce.Cart", "Commerce.Orders" */
   service?: string;
   identityProvider?: string;
-  /** Only "role": "admin" | "buyer" | "viewer" per the agreed request template. */
+  /** Flat Trust Framework attributes for the authenticated subject and request context. */
   attributes: Record<string, string>;
 }
 
@@ -265,7 +265,8 @@ export interface PdpResponse {
    */
   authorised?: boolean;
   authorized?: boolean;
-  statements: PdpStatement[];
+  /** Tenants can return an object keyed by statement ID, including an empty object. */
+  statements?: PdpStatement[] | Record<string, PdpStatement> | null;
   status: { code: string; messages: string[]; errors: string[] };
 }
 

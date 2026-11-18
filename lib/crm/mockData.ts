@@ -251,11 +251,9 @@ export const CRM_USERS: CrmUser[] = [
   },
 ];
 
-// NOTE: entitlements for the 50 local-mock-IDP users (lib/auth/dynamoUsers.ts)
-// are intentionally NOT seeded here — they are resolved from DynamoDB at
-// request time (lib/crm/dynamoEntitlementService.ts), never duplicated into
-// this Supabase/mock fallback store. See lib/crm/crmService.ts's branch on
-// isDynamoIdpUser().
+// NOTE: enterprise mock-IDP users' entitlements are intentionally NOT seeded
+// here — they are resolved from DynamoDB at request time, never duplicated
+// into this Supabase/mock fallback store.
 
 export const CRM_USERS_BY_ID: Record<string, CrmUser> = Object.fromEntries(
   CRM_USERS.map((u) => [u.id, u])

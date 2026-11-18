@@ -11,17 +11,8 @@ import type { AuthorizationProvider } from "./providers/AuthorizationProvider";
 
 export type AuthProviderName = "ping";
 
-interface FactoryState {
-  ping: PingAuthorizeProvider | null;
-}
-
-function getState(): FactoryState {
-  const g = globalThis as unknown as { __authProviderFactoryState?: FactoryState };
-  if (!g.__authProviderFactoryState) {
-    g.__authProviderFactoryState = { ping: null };
-  }
-  return g.__authProviderFactoryState;
-}
+// Keep executable provider code module-scoped so hot reloads replace stale implementations.
+let ping: PingAuthorizeProvider | null = null;
 
 /** Only "ping" is supported — kept as a function for call-site compatibility. */
 export function getActiveProviderName(): AuthProviderName {
@@ -30,9 +21,8 @@ export function getActiveProviderName(): AuthProviderName {
 
 /** Get the singleton PingAuthorize provider instance. */
 export function getAuthorizationProvider(): AuthorizationProvider {
-  const state = getState();
-  if (!state.ping) state.ping = new PingAuthorizeProvider();
-  return state.ping;
+  if (!ping) ping = new PingAuthorizeProvider();
+  return ping;
 }
 
 /** Get a specific provider by name — only "ping" is valid now. */

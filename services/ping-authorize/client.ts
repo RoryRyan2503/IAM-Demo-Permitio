@@ -6,7 +6,7 @@ import { getCurrentTrace, type UpstreamCall } from "@/lib/debug/traceStore";
  * Thin wrapper around fetch() for talking to a real PingAuthorize deployment:
  *   - PAP (Policy Administration Point) — policy editor REST APIs, base URL
  *     from PING_PAP_URL.
- *   - PDP (Policy Decision Point) — JSON PDP API, base URL from PING_PDP_URL.
+ *   - PDP (Policy Decision Point) — complete JSON PDP endpoint from PING_PDP_URL.
  *
  * Auth: PingAuthorize's Policy Manager API documents three auth modes:
  *   - "None" — a plain `x-user-id: <userId>` header identifying the acting
@@ -135,11 +135,12 @@ export async function pingRequest<T>(
   const { method = "GET", body, headers = {}, retries = 2, timeoutMs = 5000, respondWith } = options;
 
   const activeTrace = getCurrentTrace();
+  const url = path ? `${baseUrl.replace(/\/$/, "")}${path}` : baseUrl;
   const requestBodyText = body !== undefined ? JSON.stringify(body) : undefined;
   const upstreamCall: UpstreamCall = {
     service: "PingAuthorize",
     method,
-    url: `${baseUrl.replace(/\/$/, "")}${path}`,
+    url,
     requestBody: requestBodyText ? requestBodyText.substring(0, 4000) : undefined,
   };
   activeTrace?.upstreamCalls.push(upstreamCall);
@@ -157,7 +158,6 @@ export async function pingRequest<T>(
     requestHeaders["X-Respond-With"] = respondWith.join(", ");
   }
 
-  const url = `${baseUrl.replace(/\/$/, "")}${path}`;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
